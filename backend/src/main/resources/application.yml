@@ -5,6 +5,17 @@ spring:
   datasource:
     url: jdbc:sqlite:./data/signals.db
     driver-class-name: org.sqlite.JDBC
+  mail:
+    host: ${SPRING_MAIL_HOST:}
+    port: ${SPRING_MAIL_PORT:587}
+    username: ${SPRING_MAIL_USERNAME:}
+    password: ${SPRING_MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: ${SPRING_MAIL_SMTP_AUTH:true}
+          starttls:
+            enable: ${SPRING_MAIL_SMTP_STARTTLS_ENABLE:true}
   jackson:
     serialization:
       write-dates-as-timestamps: false
@@ -22,3 +33,17 @@ app:
       V200: watchlists/v200.yml
       BANK: watchlists/bank.yml
       NBFC: watchlists/nbfc.yml
+  scheduler:
+    timezone: ${APP_SCHEDULER_TIMEZONE:Asia/Kolkata}
+    hourly:
+      enabled: ${APP_SCHEDULER_HOURLY_ENABLED:false}
+      cron: ${APP_SCHEDULER_HOURLY_CRON:0 5 10-15 ? * MON-FRI}
+    daily:
+      enabled: ${APP_SCHEDULER_DAILY_ENABLED:false}
+      cron: ${APP_SCHEDULER_DAILY_CRON:0 20 16 ? * MON-FRI}
+  notifications:
+    recipients: ${APP_NOTIFICATION_RECIPIENTS:}
+    from: ${APP_NOTIFICATION_FROM:}
+    sender-name: ${APP_NOTIFICATION_SENDER_NAME:Stock Signal Tracker}
+    hourly-include-empty: ${APP_NOTIFICATION_HOURLY_INCLUDE_EMPTY:false}
+    daily-include-empty: ${APP_NOTIFICATION_DAILY_INCLUDE_EMPTY:true}

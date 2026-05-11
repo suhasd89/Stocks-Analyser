@@ -11,6 +11,6 @@ public record DashboardResponse(
     String serverTime
 ) {
 
-    public record ScannerSummary(ScannerRun lastRun, int coverage) {
+    public record ScannerSummary(ScannerRun lastRun, int coverage, List<ScannerFailure> failures) {
     }
 }

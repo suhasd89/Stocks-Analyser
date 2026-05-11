@@ -2,6 +2,7 @@ package com.suhas.stocktracker.service;
 import com.suhas.stocktracker.model.WatchlistGroupSummary;
 import com.suhas.stocktracker.model.WatchlistStock;
 import com.suhas.stocktracker.model.StoredUser;
+import com.suhas.stocktracker.model.ScannerFailure;
 import com.suhas.stocktracker.model.ScannerResult;
 import com.suhas.stocktracker.model.ScannerRun;
 import com.suhas.stocktracker.model.StrategyType;
@@ -57,6 +58,19 @@ public class DatabaseService {
                 started_at TEXT NOT NULL,
                 completed_at TEXT,
                 stocks_scanned INTEGER DEFAULT 0
+            )
+            """);
+        jdbcTemplate.execute("""
+            CREATE TABLE IF NOT EXISTS strategy_scanner_failures (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id INTEGER NOT NULL,
+                strategy_slug TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                name TEXT NOT NULL,
+                group_name TEXT NOT NULL,
+                yahoo_symbol TEXT NOT NULL,
+                error TEXT NOT NULL,
+                failed_at TEXT NOT NULL
             )
             """);
         jdbcTemplate.execute("""
@@ -122,6 +136,25 @@ public class DatabaseService {
             SET status = ?, message = ?, completed_at = ?, stocks_scanned = ?
             WHERE id = ?
             """, status, message, OffsetDateTime.now().toString(), stocksScanned, runId);
+    }
+
+    public void insertScannerFailures(List<ScannerFailure> failures) {
+        for (ScannerFailure failure : failures) {
+            jdbcTemplate.update("""
+                INSERT INTO strategy_scanner_failures (
+                    run_id, strategy_slug, symbol, name, group_name, yahoo_symbol, error, failed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                failure.runId(),
+                failure.strategySlug(),
+                failure.symbol(),
+                failure.name(),
+                failure.group(),
+                failure.yahooSymbol(),
+                failure.error(),
+                failure.failedAt()
+            );
+        }
     }
 
     public void upsertScannerResults(List<ScannerResult> results) {
@@ -233,6 +266,24 @@ public class DatabaseService {
         return runs.isEmpty() ? null : runs.getFirst();
     }
 
+    public List<ScannerFailure> fetchScannerFailuresForRun(long runId) {
+        return jdbcTemplate.query("""
+            SELECT run_id, strategy_slug, symbol, name, group_name, yahoo_symbol, error, failed_at
+            FROM strategy_scanner_failures
+            WHERE run_id = ?
+            ORDER BY group_name ASC, symbol ASC
+            """, (rs, rowNum) -> new ScannerFailure(
+            rs.getLong("run_id"),
+            rs.getString("strategy_slug"),
+            rs.getString("symbol"),
+            rs.getString("name"),
+            rs.getString("group_name"),
+            rs.getString("yahoo_symbol"),
+            rs.getString("error"),
+            rs.getString("failed_at")
+        ), runId);
+    }
+
     public boolean hasScannerResults(StrategyType strategyType) {
         Integer count = jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM strategy_scanner_results WHERE strategy_slug = ?",
@@ -264,6 +315,30 @@ public class DatabaseService {
                 updatedAt
             );
         }
+    }
+
+    public void upsertWatchlistStock(WatchlistStock stock) {
+        Integer maxSortOrder = jdbcTemplate.queryForObject("""
+            SELECT COALESCE(MAX(sort_order), -1)
+            FROM watchlist_stocks
+            WHERE group_name = ?
+            """, Integer.class, stock.group());
+        int nextSortOrder = maxSortOrder == null ? 0 : maxSortOrder + 1;
+        jdbcTemplate.update("""
+            INSERT INTO watchlist_stocks (group_name, symbol, name, yahoo_symbol, sort_order, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(group_name, symbol) DO UPDATE SET
+                name = excluded.name,
+                yahoo_symbol = excluded.yahoo_symbol,
+                updated_at = excluded.updated_at
+            """,
+            stock.group(),
+            stock.symbol(),
+            stock.name(),
+            stock.yahooSymbol(),
+            nextSortOrder,
+            OffsetDateTime.now().toString()
+        );
     }
 
     public List<WatchlistStock> fetchWatchlistStocks() {

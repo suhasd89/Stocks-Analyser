@@ -232,14 +232,16 @@ p {
   color: var(--muted);
 }
 
-.field-label input {
+.field-label input,
+.field-label select {
   border-radius: 18px;
   border: 1px solid rgba(17, 17, 17, 0.1);
   background: rgba(255, 255, 255, 0.86);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
 }
 
-.field-label input:focus {
+.field-label input:focus,
+.field-label select:focus {
   border-color: rgba(0, 113, 227, 0.32);
   box-shadow:
     0 0 0 4px rgba(0, 113, 227, 0.1),
@@ -521,11 +523,13 @@ small {
 }
 
 input,
+select,
 button {
   font: inherit;
 }
 
-input {
+input,
+select {
   width: 100%;
   min-width: 240px;
   padding: 16px 18px;
@@ -537,7 +541,8 @@ input {
   transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
 }
 
-input:focus {
+input:focus,
+select:focus {
   border-color: rgba(20, 99, 255, 0.32);
   box-shadow: 0 0 0 4px rgba(20, 99, 255, 0.12);
 }
@@ -690,11 +695,24 @@ button:disabled {
   box-shadow: none;
 }
 
+.compact-button {
+  min-width: 0;
+  padding: 9px 12px;
+  border-radius: 12px;
+}
+
 .manage-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.6fr) minmax(220px, 0.55fr);
   gap: 18px;
   align-items: start;
+}
+
+.issue-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
 }
 
 .manage-sidecard {
@@ -934,6 +952,22 @@ tbody tr:last-child td {
   font-size: 0.98rem;
 }
 
+.inline-code {
+  display: inline-block;
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: rgba(17, 17, 17, 0.06);
+  color: var(--ink);
+  font-family: "SF Mono", "Cascadia Code", "Roboto Mono", monospace;
+  font-size: 0.86rem;
+}
+
+.error-text {
+  max-width: 520px;
+  color: #8b2d25;
+  line-height: 1.5;
+}
+
 small {
   display: block;
   line-height: 1.55;
@@ -958,6 +992,10 @@ small {
 
   .manage-grid {
     grid-template-columns: 1fr;
+  }
+
+  .issue-edit-grid {
+    grid-template-columns: 1fr 1fr;
   }
 
   .hero-copy {
@@ -1033,8 +1071,13 @@ small {
   .tab,
   .list-tab,
   button,
-  input {
+  input,
+  select {
     width: 100%;
+  }
+
+  .issue-edit-grid {
+    grid-template-columns: 1fr;
   }
 
   .list-tab {

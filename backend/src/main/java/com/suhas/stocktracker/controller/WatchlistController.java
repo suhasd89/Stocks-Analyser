@@ -3,6 +3,8 @@ package com.suhas.stocktracker.controller;
 import com.suhas.stocktracker.model.WatchlistAdminResponse;
 import com.suhas.stocktracker.model.WatchlistReplaceRequest;
 import com.suhas.stocktracker.model.WatchlistReplaceResponse;
+import com.suhas.stocktracker.model.WatchlistUpsertRequest;
+import com.suhas.stocktracker.model.WatchlistUpsertResponse;
 import com.suhas.stocktracker.service.WatchlistService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -27,5 +29,10 @@ public class WatchlistController {
     @PostMapping("/replace")
     public WatchlistReplaceResponse replace(@RequestBody WatchlistReplaceRequest request) {
         return watchlistService.replaceGroup(request.group(), request.rawText());
+    }
+
+    @PostMapping("/stock")
+    public WatchlistUpsertResponse upsertStock(@RequestBody WatchlistUpsertRequest request) {
+        return watchlistService.upsertStock(request);
     }
 }

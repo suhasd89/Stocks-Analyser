@@ -2,6 +2,7 @@ package com.suhas.stocktracker.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.suhas.stocktracker.config.AppProperties;
+import com.suhas.stocktracker.model.ScannerFailure;
 import com.suhas.stocktracker.model.ScannerResult;
 import com.suhas.stocktracker.model.ScannerRunResponse;
 import com.suhas.stocktracker.model.StrategyType;
@@ -36,7 +37,7 @@ public class ScannerService {
     public ScannerRunResponse runScanner(StrategyType strategyType) {
         long runId = databaseService.startScannerRun(strategyType);
         List<ScannerResult> results = new ArrayList<>();
-        List<String> failed = new ArrayList<>();
+        List<ScannerFailure> failures = new ArrayList<>();
         List<WatchlistStock> stocks = watchlistService.getWatchlistForStrategy(strategyType);
         Map<String, List<WatchlistStock>> stocksByYahooSymbol = new LinkedHashMap<>();
 
@@ -55,7 +56,7 @@ public class ScannerService {
             } catch (Exception exception) {
                 String message = exception.getMessage();
                 for (WatchlistStock stock : matchingStocks) {
-                    failed.add(stock.symbol() + ": " + message);
+                    failures.add(scannerFailure(runId, strategyType, stock, message));
                 }
             }
 
@@ -64,17 +65,34 @@ public class ScannerService {
             } catch (InterruptedException interruptedException) {
                 Thread.currentThread().interrupt();
                 for (WatchlistStock stock : matchingStocks) {
-                    failed.add(stock.symbol() + ": interrupted");
+                    failures.add(scannerFailure(runId, strategyType, stock, "interrupted"));
                 }
             }
         }
 
         databaseService.upsertScannerResults(results);
-        String message = failed.isEmpty()
+        databaseService.insertScannerFailures(failures);
+        String message = failures.isEmpty()
             ? "Scanned " + results.size() + " stocks successfully."
-            : "Scanned " + results.size() + " stocks. Failed: " + failed.size() + ".";
-        databaseService.finishScannerRun(runId, failed.isEmpty() ? "SUCCESS" : "PARTIAL_SUCCESS", message, results.size());
+            : "Scanned " + results.size() + " stocks. Failed: " + failures.size() + ".";
+        databaseService.finishScannerRun(runId, failures.isEmpty() ? "SUCCESS" : "PARTIAL_SUCCESS", message, results.size());
+        List<String> failed = failures.stream()
+            .map(failure -> failure.symbol() + ": " + failure.error())
+            .toList();
         return new ScannerRunResponse(true, strategyType.slug(), runId, results.size(), failed, message);
+    }
+
+    private ScannerFailure scannerFailure(long runId, StrategyType strategyType, WatchlistStock stock, String error) {
+        return new ScannerFailure(
+            runId,
+            strategyType.slug(),
+            stock.symbol(),
+            stock.name(),
+            stock.group(),
+            stock.yahooSymbol(),
+            error == null || error.isBlank() ? "unknown scanner error" : error,
+            OffsetDateTime.now().toString()
+        );
     }
 
     private List<Candle> fetchCandles(String yahooSymbol) {
@@ -88,6 +106,12 @@ public class ScannerService {
             .header(HttpHeaders.REFERER, "https://finance.yahoo.com/")
             .retrieve()
             .body(JsonNode.class);
+
+        JsonNode error = body.path("chart").path("error");
+        if (!error.isMissingNode() && !error.isNull()) {
+            String description = error.path("description").asText("Yahoo chart API returned an error");
+            throw new IllegalStateException(description);
+        }
 
         JsonNode result = body.path("chart").path("result").get(0);
         if (result == null || result.isMissingNode()) {

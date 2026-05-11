@@ -1,6 +1,7 @@
 package com.suhas.stocktracker.service;
 
 import com.suhas.stocktracker.model.DashboardResponse;
+import com.suhas.stocktracker.model.ScannerFailure;
 import com.suhas.stocktracker.model.ScannerResult;
 import com.suhas.stocktracker.model.ScannerRun;
 import com.suhas.stocktracker.model.StrategyType;
@@ -29,6 +30,9 @@ public class DashboardService {
             .stream()
             .collect(Collectors.toMap(ScannerResult::ticker, Function.identity(), (left, right) -> left));
         ScannerRun latestRun = databaseService.fetchLatestScannerRun(strategyType);
+        List<ScannerFailure> failures = latestRun == null
+            ? List.of()
+            : databaseService.fetchScannerFailuresForRun(latestRun.id());
 
         List<WatchlistRow> rows = watchlist.stream().map(stock -> {
             ScannerResult scan = scansByTicker.get(stock.symbol());
@@ -69,9 +73,10 @@ public class DashboardService {
                 "trackedStocks", watchlist.size(),
                 "activeSignals", buySignals + sellSignals,
                 "buySignals", buySignals,
-                "sellSignals", sellSignals
+                "sellSignals", sellSignals,
+                "failedStocks", failures.size()
             ),
-            new DashboardResponse.ScannerSummary(latestRun, scansByTicker.size()),
+            new DashboardResponse.ScannerSummary(latestRun, scansByTicker.size(), failures),
             OffsetDateTime.now().toString()
         );
     }

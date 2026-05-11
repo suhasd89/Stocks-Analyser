@@ -90,6 +90,8 @@ export default function App() {
   const [manageGroup, setManageGroup] = useState("V200");
   const [manageText, setManageText] = useState("");
   const [manageMessage, setManageMessage] = useState("");
+  const [issueEdit, setIssueEdit] = useState(null);
+  const [issueSaveLoading, setIssueSaveLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
   const [authMode, setAuthMode] = useState("login");
   const [authLoading, setAuthLoading] = useState(false);
@@ -388,6 +390,21 @@ export default function App() {
   const totalStrategyAlerts = dashboard.watchlist.filter(
     (row) => row.scannerSignal === "BUY" || row.scannerSignal === "SELL" || row.scannerSignal === "ALERT"
   ).length;
+  const scannerFailures = dashboard.scanner?.failures ?? [];
+  const filteredScannerFailures = scannerFailures.filter((failure) => {
+    if (activeList !== "ALL" && normalizeGroup(failure.group) !== normalizeGroup(activeList)) {
+      return false;
+    }
+    const term = query.trim().toLowerCase();
+    if (!term) return true;
+    return (
+      failure.symbol.toLowerCase().includes(term) ||
+      failure.name.toLowerCase().includes(term) ||
+      failure.group.toLowerCase().includes(term) ||
+      failure.yahooSymbol.toLowerCase().includes(term) ||
+      failure.error.toLowerCase().includes(term)
+    );
+  });
   const shareMessage = buildShareMessage(strategy, activeList, activeScannerAlerts);
   const visibleLists = LISTS.filter((item) => {
     if (item.key === "ALL") {
@@ -419,6 +436,50 @@ export default function App() {
 
   const openTradingView = (row) => {
     window.open(tradingViewUrl(row), "_blank", "noopener,noreferrer");
+  };
+
+  const startIssueEdit = (failure) => {
+    setIssueEdit({
+      group: failure.group,
+      symbol: failure.symbol,
+      name: failure.name,
+      yahooSymbol: failure.yahooSymbol,
+    });
+    setStatusMessage("");
+  };
+
+  const updateIssueEdit = (field, value) => {
+    setIssueEdit((current) => current ? { ...current, [field]: value } : current);
+  };
+
+  const saveIssueStock = async () => {
+    if (!issueEdit) {
+      return;
+    }
+    setIssueSaveLoading(true);
+    setStatusMessage("");
+    try {
+      const payload = await fetchJson(`${API_BASE}/watchlists/stock`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(issueEdit),
+      });
+      const nextStrategy = normalizeGroup(payload.group) === "V40" ? "sma" : "v20";
+      setStrategy(nextStrategy);
+      setActiveList(payload.group);
+      await Promise.all([
+        loadDashboard(nextStrategy),
+        isAdmin ? loadWatchlists() : Promise.resolve(null),
+      ]);
+      setIssueEdit(null);
+      setStatusMessage(`${payload.message} Run scan again to verify the updated symbol.`);
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Failed to save stock.");
+    } finally {
+      setIssueSaveLoading(false);
+    }
   };
 
   const saveWatchlist = async () => {
@@ -469,6 +530,9 @@ export default function App() {
         </div>
         <nav className="topbar-nav" aria-label="Section navigation">
           <button type="button" className={page === "dashboard" ? "nav-link nav-link-button active" : "nav-link nav-link-button"} onClick={() => setPage("dashboard")}>Dashboard</button>
+          <button type="button" className={page === "issues" ? "nav-link nav-link-button active" : "nav-link nav-link-button"} onClick={() => setPage("issues")}>
+            Scan Issues {scannerFailures.length > 0 ? `(${scannerFailures.length})` : ""}
+          </button>
           {isAdmin ? (
             <button type="button" className={page === "manage" ? "nav-link nav-link-button active" : "nav-link nav-link-button"} onClick={() => setPage("manage")}>Manage Lists</button>
           ) : null}
@@ -750,6 +814,190 @@ export default function App() {
             </tbody>
           </table>
         </div>
+      </section>
+        </>
+      ) : page === "issues" ? (
+        <>
+      <section className="hero hero-banner manage-hero">
+        <div className="hero-copy">
+          <p className="eyebrow">Scanner Diagnostics</p>
+          <h1>Scan Issues</h1>
+          <p className="subcopy">
+            Review failed Yahoo candle requests from the latest scanner run and fix symbols from the Manage Lists page.
+          </p>
+        </div>
+        <div className="hero-card hero-metrics">
+          <div className="metric-grid single-column-grid">
+            <div className="metric sell-tint">
+              <span>Failed Stocks</span>
+              <strong>{scannerFailures.length}</strong>
+            </div>
+            <div className="metric">
+              <span>Coverage</span>
+              <strong>{dashboard.scanner.coverage}</strong>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="panel nav-panel">
+        <div className="nav-grid">
+          <div className="nav-block">
+            <span className="nav-label">Strategy</span>
+            <div className="strategy-tabs strategy-switch strategy-row">
+              {STRATEGIES.map((item) => (
+                <button
+                  key={item.key}
+                  className={item.key === strategy ? "tab active" : "tab"}
+                  onClick={() => setStrategy(item.key)}
+                  type="button"
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="nav-block">
+            <span className="nav-label">Lists</span>
+            <div className="list-tabs compact-tabs">
+              {visibleLists.map((item) => {
+                const count = item.key === "ALL"
+                  ? scannerFailures.length
+                  : scannerFailures.filter((failure) => normalizeGroup(failure.group) === normalizeGroup(item.key)).length;
+                return (
+                  <button
+                    key={item.key}
+                    className={item.key === activeList ? "tab list-tab active" : "tab list-tab"}
+                    onClick={() => setActiveList(item.key)}
+                    type="button"
+                  >
+                    <span>{item.label}</span>
+                    <strong>{count}</strong>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div className="nav-block search-block">
+            <span className="nav-label">Search</span>
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              type="search"
+              placeholder="Search failed symbol, list, or error"
+            />
+          </div>
+          <div className="nav-block actions-block">
+            <span className="nav-label">Actions</span>
+            <div className="toolbar-actions">
+              <button onClick={runScan} disabled={scanLoading}>
+                {scanLoading ? "Scanning..." : "Run Scan Again"}
+              </button>
+              <button className="secondary-button" onClick={refreshAll}>Refresh</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {isAdmin ? (
+        <section className="panel panel-manage roomy-panel">
+          <div className="panel-header">
+            <h2>Fix Or Add Stock</h2>
+            <p>Select a failed row, adjust the final symbol details, and save it into the correct list.</p>
+          </div>
+          {issueEdit ? (
+            <>
+              <div className="issue-edit-grid">
+                <label className="field-label">
+                  <span>List</span>
+                  <select value={issueEdit.group} onChange={(event) => updateIssueEdit("group", event.target.value)}>
+                    {MANAGEABLE_LISTS.map((item) => (
+                      <option key={item.key} value={item.key}>{item.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field-label">
+                  <span>Symbol</span>
+                  <input value={issueEdit.symbol} onChange={(event) => updateIssueEdit("symbol", event.target.value)} />
+                </label>
+                <label className="field-label">
+                  <span>Name</span>
+                  <input value={issueEdit.name} onChange={(event) => updateIssueEdit("name", event.target.value)} />
+                </label>
+                <label className="field-label">
+                  <span>Yahoo Symbol</span>
+                  <input value={issueEdit.yahooSymbol} onChange={(event) => updateIssueEdit("yahooSymbol", event.target.value)} placeholder="Example: BSE.NS" />
+                </label>
+              </div>
+              <div className="toolbar-actions">
+                <button type="button" onClick={saveIssueStock} disabled={issueSaveLoading}>
+                  {issueSaveLoading ? "Saving..." : "Save Stock"}
+                </button>
+                <button type="button" className="secondary-button" onClick={() => setIssueEdit(null)}>Cancel</button>
+              </div>
+            </>
+          ) : (
+            <div className="empty">Choose `Edit` from a failed stock row to correct or move it.</div>
+          )}
+        </section>
+      ) : null}
+
+      <section className="panel">
+        <div className="panel-header">
+          <h2>Latest Run Failures ({filteredScannerFailures.length})</h2>
+          <p>
+            {dashboard.scanner.lastRun
+              ? `${dashboard.scanner.lastRun.status} - ${dashboard.scanner.lastRun.message} Last run: ${formatDate(
+                  dashboard.scanner.lastRun.completedAt || dashboard.scanner.lastRun.startedAt
+                )}.`
+              : "No scanner run has been recorded yet."}
+          </p>
+        </div>
+        {filteredScannerFailures.length === 0 ? (
+          <div className="empty">
+            {scannerFailures.length === 0
+              ? "No failed stocks in the latest run for this strategy."
+              : "No failures match the current filter."}
+          </div>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Stock</th>
+                  <th>List</th>
+                  <th>Yahoo Symbol</th>
+                  <th>Error</th>
+                  <th>Failed At</th>
+                  {isAdmin ? <th>Fix</th> : null}
+                </tr>
+              </thead>
+              <tbody>
+                {filteredScannerFailures.map((failure) => (
+                  <tr key={`${failure.runId}-${failure.group}-${failure.symbol}-${failure.yahooSymbol}`}>
+                    <td>
+                      <div className="stock-cell">
+                        <strong>{failure.symbol}</strong>
+                        <span>{failure.name}</span>
+                      </div>
+                    </td>
+                    <td>{normalizeGroup(failure.group) === "V40NEXT" ? "V40 NEXT" : failure.group}</td>
+                    <td><code className="inline-code">{failure.yahooSymbol}</code></td>
+                    <td className="error-text">{failure.error}</td>
+                    <td>{formatDate(failure.failedAt)}</td>
+                    {isAdmin ? (
+                      <td>
+                        <button type="button" className="secondary-button compact-button" onClick={() => startIssueEdit(failure)}>
+                          Edit
+                        </button>
+                      </td>
+                    ) : null}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
         </>
       ) : (

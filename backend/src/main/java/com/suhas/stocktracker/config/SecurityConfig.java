@@ -44,7 +44,7 @@ public class SecurityConfig {
             .logout(logout -> logout.disable())
             .authorizeHttpRequests(authorize -> authorize
                 .requestMatchers("/api/health", "/api/auth/login", "/api/auth/signup").permitAll()
-                .requestMatchers("/api/watchlists/**").hasRole("ADMIN")
+                .requestMatchers("/api/watchlists/**", "/api/notifications/**").hasRole("ADMIN")
                 .anyRequest().authenticated()
             );
         return http.build();

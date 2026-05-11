@@ -6,6 +6,8 @@ import com.suhas.stocktracker.config.AppProperties;
 import com.suhas.stocktracker.model.WatchlistAdminResponse;
 import com.suhas.stocktracker.model.WatchlistGroupSummary;
 import com.suhas.stocktracker.model.WatchlistReplaceResponse;
+import com.suhas.stocktracker.model.WatchlistUpsertRequest;
+import com.suhas.stocktracker.model.WatchlistUpsertResponse;
 import com.suhas.stocktracker.model.StrategyType;
 import com.suhas.stocktracker.model.WatchlistStock;
 import jakarta.annotation.PostConstruct;
@@ -116,6 +118,42 @@ public class WatchlistService {
             resolved.size(),
             guessed,
             "Stored " + resolved.size() + " stocks for " + normalizedGroup + "."
+        );
+    }
+
+    public WatchlistUpsertResponse upsertStock(WatchlistUpsertRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("request is required");
+        }
+        if (request.group() == null || request.group().isBlank()) {
+            throw new IllegalArgumentException("group is required");
+        }
+        if (request.symbol() == null || request.symbol().isBlank()) {
+            throw new IllegalArgumentException("symbol is required");
+        }
+        if (request.name() == null || request.name().isBlank()) {
+            throw new IllegalArgumentException("name is required");
+        }
+        if (request.yahooSymbol() == null || request.yahooSymbol().isBlank()) {
+            throw new IllegalArgumentException("yahooSymbol is required");
+        }
+
+        String normalizedGroup = normalizeGroup(request.group());
+        String symbol = normalizeTicker(request.symbol());
+        String yahooSymbol = request.yahooSymbol().trim().toUpperCase(Locale.ROOT);
+        WatchlistStock stock = new WatchlistStock(
+            symbol,
+            request.name().trim(),
+            normalizedGroup,
+            yahooSymbol
+        );
+        databaseService.upsertWatchlistStock(stock);
+        return new WatchlistUpsertResponse(
+            true,
+            normalizedGroup,
+            symbol,
+            yahooSymbol,
+            "Saved " + symbol + " in " + normalizedGroup + "."
         );
     }
 
