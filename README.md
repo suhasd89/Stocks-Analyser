@@ -4,13 +4,13 @@ This repo contains a Spring Boot microservice and a React UI for the stock track
 
 ## Structure
 
-- [backend](/Users/suhasdeshmukh/Documents/New%20project/backend): Spring Boot + Maven microservice running on Java 25
-- [frontend](/Users/suhasdeshmukh/Documents/New%20project/frontend): React + Vite UI
-- [tradingview/sma_strategy_20_50_200.pine](/Users/suhasdeshmukh/Documents/New%20project/tradingview/sma_strategy_20_50_200.pine): Reference Pine script
+- [backend](./backend): Spring Boot + Maven microservice running on Java 25
+- [frontend](./frontend): React + Vite UI
+- [tradingview](./tradingview): TradingView Pine scripts
 
 ## What the new stack does
 
-- Loads watchlists from YAML resources configured in [application.yml](/Users/suhasdeshmukh/Documents/New%20project/backend/src/main/resources/application.yml)
+- Loads watchlists from YAML resources configured in [application.yml](./backend/src/main/resources/application.yml)
 - Runs local daily scanners against Yahoo Finance candles
 - Runs Yahoo candle scans in parallel with bounded Java virtual-thread workers
 - Stores watchlists in SQLite after an initial YAML seed
@@ -54,7 +54,7 @@ The notification endpoints are admin-only.
 Typical local run on your machine:
 
 ```bash
-cd /Users/suhasdeshmukh/Documents/New\ project/backend
+cd backend
 mvn spring-boot:run
 ```
 
@@ -78,7 +78,7 @@ export APP_SCHEDULER_DAILY_ENABLED="true"
 Typical local run on your machine:
 
 ```bash
-cd /Users/suhasdeshmukh/Documents/New\ project/frontend
+cd frontend
 npm install
 npm run dev
 ```
@@ -94,7 +94,6 @@ VITE_API_BASE_URL=http://localhost:8080
 You can also run the full app with Docker Compose from the project root:
 
 ```bash
-cd /Users/suhasdeshmukh/Documents/New\ project
 docker compose up --build
 ```
 
@@ -118,7 +117,7 @@ docker compose down
 You can copy the sample environment file first:
 
 ```bash
-cp /Users/suhasdeshmukh/Documents/New\ project/.env.example /Users/suhasdeshmukh/Documents/New\ project/.env
+cp .env.example .env
 ```
 
 Notes:
@@ -143,20 +142,20 @@ Notes:
 - The repo is now Java + React only. All earlier Python prototype files have been removed.
 - Watchlists are plug-and-play YAML files:
 - YAML files now act as the initial seed for the database-backed watchlists:
-  - [v40.yml](/Users/suhasdeshmukh/Documents/New%20project/backend/src/main/resources/watchlists/v40.yml)
-  - [v40-next.yml](/Users/suhasdeshmukh/Documents/New%20project/backend/src/main/resources/watchlists/v40-next.yml)
-  - [v200.yml](/Users/suhasdeshmukh/Documents/New%20project/backend/src/main/resources/watchlists/v200.yml)
-  - [bank.yml](/Users/suhasdeshmukh/Documents/New%20project/backend/src/main/resources/watchlists/bank.yml)
-  - [nbfc.yml](/Users/suhasdeshmukh/Documents/New%20project/backend/src/main/resources/watchlists/nbfc.yml)
-- The source-verified multibagger research framework lives in [research/indian_multibagger_strategy.md](/Users/suhasdeshmukh/Documents/New%20project/research/indian_multibagger_strategy.md). The app implements the first-pass local screener from that framework; manual source verification remains outside the candle scanner.
+  - [v40.yml](./backend/src/main/resources/watchlists/v40.yml)
+  - [v40-next.yml](./backend/src/main/resources/watchlists/v40-next.yml)
+  - [v200.yml](./backend/src/main/resources/watchlists/v200.yml)
+  - [bank.yml](./backend/src/main/resources/watchlists/bank.yml)
+  - [nbfc.yml](./backend/src/main/resources/watchlists/nbfc.yml)
+- The source-verified multibagger research framework lives in [research/indian_multibagger_strategy.md](./research/indian_multibagger_strategy.md). The app implements the first-pass local screener from that framework; manual source verification remains outside the candle scanner.
 - After first startup, you can replace a list directly from the UI by pasting one company per line into the `Watchlist Manager`.
 - WhatsApp and email sharing are client-side convenience actions. WhatsApp opens with prefilled text, but the final send still happens from your device/app.
 - Backend scheduled emails are server-side and use SMTP. For OCI Email Delivery, configure the SMTP values in `.env` and use an approved sender email in `APP_NOTIFICATION_FROM`.
 - Reference Pine scripts available:
-  - [tradingview/sma_strategy_20_50_200.pine](/Users/suhasdeshmukh/Documents/New%20project/tradingview/sma_strategy_20_50_200.pine)
-  - [tradingview/v20.pine](/Users/suhasdeshmukh/Documents/New%20project/tradingview/v20.pine)
-  - [tradingview/india_pine_screener.pine](/Users/suhasdeshmukh/Documents/New%20project/tradingview/india_pine_screener.pine): TradingView Pine Screener-ready NSE/BSE scanner using V20 momentum, trend, 52-week-high, and liquidity filters
-  - [tradingview/india_pine_screener_usage.md](/Users/suhasdeshmukh/Documents/New%20project/tradingview/india_pine_screener_usage.md): setup notes for TradingView Pine Screener
+  - [tradingview/sma_strategy_20_50_200.pine](./tradingview/sma_strategy_20_50_200.pine)
+  - [tradingview/v20.pine](./tradingview/v20.pine)
+  - [tradingview/india_pine_screener.pine](./tradingview/india_pine_screener.pine): TradingView Pine Screener-ready NSE/BSE scanner using V20 momentum, trend, 52-week-high, and liquidity filters
+  - [tradingview/india_pine_screener_usage.md](./tradingview/india_pine_screener_usage.md): setup notes for TradingView Pine Screener
 
 ## Scheduler Settings
 
@@ -223,10 +222,10 @@ Log out once and SSH back in so the Docker group applies.
 
 ### 3. Copy the project
 
-From your machine:
+From your machine, navigate to the project directory and run:
 
 ```bash
-scp -r -i /path/to/your-private-key /Users/suhasdeshmukh/Documents/New\ project opc@YOUR_OCI_PUBLIC_IP:~/stock-tracker
+scp -r -i /path/to/your-private-key . opc@YOUR_OCI_PUBLIC_IP:~/stock-tracker
 ```
 
 Then on the OCI VM:

@@ -1,3 +1,15 @@
-target/
-data/
+target
+data
 .DS_Store
+.git
+.gitignore
+README.md
+.env.local
+.vscode
+.idea
+*.iml
+*.swp
+*.swo
+.classpath
+.project
+.settings
