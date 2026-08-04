@@ -4,6 +4,8 @@ public record WatchlistUpsertRequest(
     String group,
     String symbol,
     String name,
-    String yahooSymbol
+    String yahooSymbol,
+    String originalGroup,
+    String originalSymbol
 ) {
 }

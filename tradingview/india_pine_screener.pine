@@ -1,0 +1,103 @@
+//@version=6
+indicator("India Pine Screener - V20 + Trend", overlay=true)
+
+// Use this with TradingView's Pine Screener against an NSE/BSE watchlist.
+// The plotted numeric columns are what the Pine Screener can filter/sort.
+
+restrictToIndia = input.bool(true, "Only NSE/BSE symbols")
+setupMode = input.string("Either", "Setup Mode", options=["Either", "V20 Momentum", "SMA Trend"])
+
+minMovePercent = input.float(20.0, "V20 minimum move (%)", minval=1.0, step=0.5)
+minGreenBars = input.int(1, "Minimum consecutive green bars", minval=1, maxval=20)
+
+smaFastLength = input.int(50, "Fast SMA", minval=5)
+smaSlowLength = input.int(200, "Slow SMA", minval=20)
+highLookback = input.int(260, "52-week high lookback", minval=50)
+maxFromHighPercent = input.float(25.0, "Max distance from 52-week high (%)", minval=0.0, step=0.5)
+
+avgVolumeLength = input.int(20, "Average volume length", minval=5)
+minVolumeRatio = input.float(1.0, "Minimum volume / average volume", minval=0.0, step=0.1)
+minTurnoverCr = input.float(5.0, "Minimum turnover (Rs crore)", minval=0.0, step=0.5)
+
+riskLookback = input.int(10, "Stop lookback", minval=2, maxval=60)
+
+isIndianSymbol = syminfo.prefix == "NSE" or syminfo.prefix == "BSE"
+marketOk = not restrictToIndia or isIndianSymbol
+
+smaFast = ta.sma(close, smaFastLength)
+smaSlow = ta.sma(close, smaSlowLength)
+avgVolume = ta.sma(volume, avgVolumeLength)
+
+turnoverCr = close * volume / 10000000.0
+volumeRatio = avgVolume > 0 ? volume / avgVolume : na
+liquidityOk = turnoverCr >= minTurnoverCr and volumeRatio >= minVolumeRatio
+
+high52Week = ta.highest(high, highLookback)
+fromHighPercent = high52Week > 0 ? (high52Week - close) / high52Week * 100.0 : na
+nearHigh = fromHighPercent <= maxFromHighPercent
+
+trendOk = close > smaFast and smaFast > smaSlow and smaFast > smaFast[1] and smaSlow >= smaSlow[1] and nearHigh
+
+var float sequenceLow = na
+var float sequenceHigh = na
+var int greenCandleCount = 0
+var bool sequenceStarted = false
+
+isGreenCandle = close > open
+
+if isGreenCandle
+    if not sequenceStarted
+        sequenceLow := low
+        sequenceHigh := high
+        greenCandleCount := 1
+        sequenceStarted := true
+    else
+        sequenceLow := math.min(sequenceLow, low)
+        sequenceHigh := math.max(sequenceHigh, high)
+        greenCandleCount += 1
+else
+    sequenceLow := na
+    sequenceHigh := na
+    greenCandleCount := 0
+    sequenceStarted := false
+
+v20MovePercent = sequenceStarted and sequenceLow > 0 ? (sequenceHigh - sequenceLow) / sequenceLow * 100.0 : na
+v20Signal = sequenceStarted and greenCandleCount >= minGreenBars and v20MovePercent >= minMovePercent
+
+modeV20 = setupMode == "V20 Momentum"
+modeTrend = setupMode == "SMA Trend"
+setupOk = modeV20 ? v20Signal : modeTrend ? trendOk : (v20Signal or trendOk)
+
+scanPass = marketOk and liquidityOk and setupOk
+buySignal = scanPass and close > smaSlow and nearHigh
+
+stopPrice = ta.lowest(low, riskLookback)
+stopPercent = stopPrice > 0 ? (close - stopPrice) / close * 100.0 : na
+
+// Pine Screener columns. Keep these as the first ten plots so they appear first in the screener.
+plot(scanPass ? 1 : 0, title="Scan Pass", display=display.data_window)
+plot(buySignal ? 1 : 0, title="Buy Signal", display=display.data_window)
+plot(v20Signal and marketOk ? 1 : 0, title="V20 Breakout", display=display.data_window)
+plot(trendOk and marketOk ? 1 : 0, title="Trend OK", display=display.data_window)
+plot(turnoverCr, title="Turnover Cr", display=display.data_window)
+plot(v20MovePercent, title="V20 Move %", display=display.data_window)
+plot(fromHighPercent, title="From 52W High %", display=display.data_window)
+plot(close, title="Close", display=display.data_window)
+plot(volumeRatio, title="Vol / Avg Vol", display=display.data_window)
+plot(stopPercent, title="Stop %", display=display.data_window)
+
+plotshape(buySignal, title="Buy Signal Marker", location=location.belowbar, color=color.green, style=shape.labelup, text="BUY", textcolor=color.white)
+plotshape(v20Signal and marketOk, title="V20 Signal Marker", location=location.belowbar, color=color.teal, style=shape.triangleup, text="V20", textcolor=color.white)
+
+plot(smaFast, title="Fast SMA", color=color.orange, linewidth=1)
+plot(smaSlow, title="Slow SMA", color=color.blue, linewidth=1)
+plot(high52Week, title="52W High", color=color.green, linewidth=1, style=plot.style_stepline)
+
+alertcondition(buySignal, title="India Screener Buy", message='{"ticker":"{{ticker}}","exchange":"{{exchange}}","action":"BUY","strategy":"India Pine Screener - V20 + Trend","price":"{{close}}","timeframe":"{{interval}}","timestamp":"{{timenow}}"}')
+alertcondition(v20Signal and marketOk, title="India Screener V20 Breakout", message='{"ticker":"{{ticker}}","exchange":"{{exchange}}","action":"WATCH","strategy":"V20 Momentum","price":"{{close}}","timeframe":"{{interval}}","timestamp":"{{timenow}}"}')
+
+if v20Signal
+    sequenceLow := na
+    sequenceHigh := na
+    greenCandleCount := 0
+    sequenceStarted := false

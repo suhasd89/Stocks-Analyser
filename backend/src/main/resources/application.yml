@@ -1,7 +1,16 @@
 server:
   port: 8080
 
+logging:
+  file:
+    name: ${APP_LOG_FILE:./data/stock-tracker.log}
+  level:
+    com.suhas.stocktracker: ${APP_LOG_LEVEL:INFO}
+
 spring:
+  threads:
+    virtual:
+      enabled: true
   datasource:
     url: jdbc:sqlite:./data/signals.db
     driver-class-name: org.sqlite.JDBC
@@ -16,16 +25,16 @@ spring:
           auth: ${SPRING_MAIL_SMTP_AUTH:true}
           starttls:
             enable: ${SPRING_MAIL_SMTP_STARTTLS_ENABLE:true}
-  jackson:
-    serialization:
-      write-dates-as-timestamps: false
-
 app:
   scanner:
     range: 2y
     interval: 1d
     strategy-name: "SMA Strategy: 20/50/200"
     pause-millis: 350
+    max-concurrency: ${APP_SCANNER_MAX_CONCURRENCY:12}
+  market-universe:
+    nse-equity-list-url: ${APP_MARKET_UNIVERSE_NSE_EQUITY_LIST_URL:https://archives.nseindia.com/content/equities/EQUITY_L.csv}
+    max-symbols: ${APP_MARKET_UNIVERSE_MAX_SYMBOLS:0}
   watchlists:
     resources:
       V40: watchlists/v40.yml

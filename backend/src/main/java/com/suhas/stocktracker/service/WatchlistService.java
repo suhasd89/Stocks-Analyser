@@ -19,11 +19,15 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
 @Service
 public class WatchlistService {
+    private static final Logger log = LoggerFactory.getLogger(WatchlistService.class);
+
     private final ObjectMapper yamlMapper;
     private final AppProperties appProperties;
     private final DatabaseService databaseService;
@@ -38,12 +42,21 @@ public class WatchlistService {
 
     @PostConstruct
     void seedDatabaseIfNeeded() {
-        if (databaseService.hasWatchlistStocks()) {
-            return;
-        }
         Map<String, List<WatchlistStock>> byGroup = new LinkedHashMap<>();
         for (WatchlistStock stock : seedWatchlist) {
             byGroup.computeIfAbsent(stock.group(), ignored -> new ArrayList<>()).add(stock);
+        }
+        if (databaseService.hasWatchlistStocks()) {
+            LinkedHashSet<String> existingGroups = databaseService.fetchWatchlistGroupSummaries().stream()
+                .map(WatchlistGroupSummary::group)
+                .collect(LinkedHashSet::new, LinkedHashSet::add, LinkedHashSet::addAll);
+            byGroup.forEach((group, stocks) -> {
+                if (!existingGroups.contains(group)) {
+                    databaseService.replaceWatchlistGroup(group, stocks);
+                    log.info("Seeded new watchlist group {} with {} stocks.", group, stocks.size());
+                }
+            });
+            return;
         }
         byGroup.forEach(databaseService::replaceWatchlistGroup);
     }
@@ -58,11 +71,24 @@ public class WatchlistService {
             .toList();
     }
 
+    public List<WatchlistStock> getWatchlistForStrategy(StrategyType strategyType, String group) {
+        String normalizedGroup = normalizeOptionalGroup(group);
+        return getWatchlistForStrategy(strategyType).stream()
+            .filter(stock -> normalizedGroup == null || normalizeGroup(stock.group()).equals(normalizedGroup))
+            .toList();
+    }
+
     private boolean isEligibleForStrategy(WatchlistStock stock, StrategyType strategyType) {
         if (strategyType == StrategyType.SMA) {
             return "V40".equalsIgnoreCase(stock.group());
         }
-        return true;
+        if (strategyType == StrategyType.V20) {
+            return !"MULTIBAGGER".equalsIgnoreCase(stock.group());
+        }
+        if (strategyType == StrategyType.MULTIBAGGER) {
+            return !"MULTIBAGGER".equalsIgnoreCase(stock.group());
+        }
+        return false;
     }
 
     public WatchlistAdminResponse fetchAdminWatchlists() {
@@ -141,6 +167,19 @@ public class WatchlistService {
         String normalizedGroup = normalizeGroup(request.group());
         String symbol = normalizeTicker(request.symbol());
         String yahooSymbol = request.yahooSymbol().trim().toUpperCase(Locale.ROOT);
+        String originalGroup = request.originalGroup() == null || request.originalGroup().isBlank()
+            ? normalizedGroup
+            : normalizeGroup(request.originalGroup());
+        String originalSymbol = request.originalSymbol() == null || request.originalSymbol().isBlank()
+            ? symbol
+            : normalizeTicker(request.originalSymbol());
+
+        if (!originalGroup.equals(normalizedGroup) || !originalSymbol.equals(symbol)) {
+            databaseService.deleteWatchlistStock(originalGroup, originalSymbol);
+            log.info("Removed old watchlist stock {} from {} before saving corrected symbol {} in {}.",
+                originalSymbol, originalGroup, symbol, normalizedGroup);
+        }
+
         WatchlistStock stock = new WatchlistStock(
             symbol,
             request.name().trim(),
@@ -148,6 +187,8 @@ public class WatchlistService {
             yahooSymbol
         );
         databaseService.upsertWatchlistStock(stock);
+        log.info("Saved watchlist stock {} ({}) in {} with Yahoo symbol {}.",
+            stock.symbol(), stock.name(), stock.group(), stock.yahooSymbol());
         return new WatchlistUpsertResponse(
             true,
             normalizedGroup,
@@ -206,6 +247,13 @@ public class WatchlistService {
             return "V40 NEXT";
         }
         return normalized;
+    }
+
+    private String normalizeOptionalGroup(String group) {
+        if (group == null || group.isBlank() || "ALL".equalsIgnoreCase(group.trim())) {
+            return null;
+        }
+        return normalizeGroup(group);
     }
 
     private record WatchlistFile(List<WatchlistEntry> stocks) {

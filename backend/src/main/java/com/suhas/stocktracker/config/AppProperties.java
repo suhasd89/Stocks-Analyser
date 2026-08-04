@@ -4,9 +4,13 @@ import java.util.Map;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "app")
-public record AppProperties(Scanner scanner, Watchlists watchlists, Scheduler scheduler, Notifications notifications) {
+public record AppProperties(Scanner scanner, MarketUniverse marketUniverse, Watchlists watchlists, Scheduler scheduler,
+                            Notifications notifications) {
 
-    public record Scanner(String range, String interval, String strategyName, long pauseMillis) {
+    public record Scanner(String range, String interval, String strategyName, long pauseMillis, int maxConcurrency) {
+    }
+
+    public record MarketUniverse(String nseEquityListUrl, int maxSymbols) {
     }
 
     public record Watchlists(Map<String, String> resources) {

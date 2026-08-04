@@ -23,6 +23,7 @@ public record WatchlistRow(
     Double percentBelowLifetimeHigh,
     Double high52Week,
     Double low52Week,
+    Double scannerScore,
     String notes
 ) {
 }

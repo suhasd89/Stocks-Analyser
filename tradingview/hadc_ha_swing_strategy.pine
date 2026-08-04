@@ -1,0 +1,170 @@
+//@version=6
+strategy(
+     "HADC HA Swing Strategy - Daily Positional",
+     overlay=true,
+     initial_capital=100000,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=100,
+     pyramiding=2,
+     commission_type=strategy.commission.percent,
+     commission_value=0.05,
+     process_orders_on_close=true
+)
+
+// Backtest companion for hadc_ha_swing_indicator.pine.
+// Use on a normal candlestick chart for realistic fills; signals are derived from internal Heikin Ashi data.
+
+signalTimeframe = input.timeframe("D", "Signal timeframe")
+tradeDirection = input.string("Long only", "Trade direction", options=["Long only", "Long and short"])
+fastLength = input.int(21, "Fast EMA length", minval=2)
+slowLength = input.int(55, "Slow EMA length", minval=5)
+dmiLength = input.int(14, "DMI length", minval=2)
+adxSmoothing = input.int(14, "ADX smoothing", minval=2)
+minAdx = input.float(18.0, "Minimum ADX for trend", minval=1.0, step=0.5)
+strongBodyPercent = input.float(55.0, "Strong HA body %", minval=1.0, maxval=100.0, step=1.0)
+holdBodyPercent = input.float(28.0, "Hold/consolidation body %", minval=1.0, maxval=100.0, step=1.0)
+atrLength = input.int(14, "ATR stop length", minval=2)
+atrMultiplier = input.float(2.5, "ATR reversal multiplier", minval=0.5, step=0.1)
+usePartialExits = input.bool(true, "Use H/R partial exits")
+holdExitPercent = input.float(33.0, "H partial exit %", minval=1.0, maxval=99.0, step=1.0)
+reversalExitPercent = input.float(67.0, "R partial exit %", minval=1.0, maxval=100.0, step=1.0)
+addOnContinuation = input.bool(false, "Pyramid on continuation B/S")
+
+haTicker = ticker.heikinashi(syminfo.tickerid)
+[haOpen, haHigh, haLow, haClose] = request.security(
+     haTicker,
+     signalTimeframe,
+     [open, high, low, close],
+     gaps=barmerge.gaps_off,
+     lookahead=barmerge.lookahead_off
+)
+
+emaFast = ta.ema(haClose, fastLength)
+emaSlow = ta.ema(haClose, slowLength)
+
+haRange = math.max(haHigh - haLow, syminfo.mintick)
+haBody = math.abs(haClose - haOpen)
+haBodyPercent = haBody / haRange * 100.0
+haBull = haClose > haOpen
+haBear = haClose < haOpen
+haStrong = haBodyPercent >= strongBodyPercent
+haWeak = haBodyPercent <= holdBodyPercent
+
+previousHaClose = nz(haClose[1], haClose)
+haUpMove = haHigh - nz(haHigh[1], haHigh)
+haDownMove = nz(haLow[1], haLow) - haLow
+haPlusDm = haUpMove > haDownMove and haUpMove > 0.0 ? haUpMove : 0.0
+haMinusDm = haDownMove > haUpMove and haDownMove > 0.0 ? haDownMove : 0.0
+haTrueRange = math.max(haHigh - haLow, math.max(math.abs(haHigh - previousHaClose), math.abs(haLow - previousHaClose)))
+haDmiRange = math.max(ta.rma(haTrueRange, dmiLength), syminfo.mintick)
+plusDi = 100.0 * ta.rma(haPlusDm, dmiLength) / haDmiRange
+minusDi = 100.0 * ta.rma(haMinusDm, dmiLength) / haDmiRange
+dxValue = 100.0 * math.abs(plusDi - minusDi) / math.max(plusDi + minusDi, syminfo.mintick)
+adxValue = ta.rma(dxValue, adxSmoothing)
+atrValue = ta.rma(haTrueRange, atrLength)
+
+longAtrLine = ta.highest(haClose, atrLength) - atrValue * atrMultiplier
+shortAtrLine = ta.lowest(haClose, atrLength) + atrValue * atrMultiplier
+
+bullSetup = haBull and haClose > emaFast and emaFast > emaSlow and plusDi > minusDi and adxValue >= minAdx
+bearSetup = haBear and haClose < emaFast and emaFast < emaSlow and minusDi > plusDi and adxValue >= minAdx
+consolidating = adxValue < minAdx or haWeak or math.abs(emaFast - emaSlow) / math.max(haClose, syminfo.mintick) * 100.0 < 0.35
+
+var int trendState = 0
+previousTrend = nz(trendState[1], 0)
+
+longReversalRisk = previousTrend == 1 and (haBear and haClose < emaFast or minusDi > plusDi and adxValue >= minAdx or haClose < longAtrLine)
+shortReversalRisk = previousTrend == -1 and (haBull and haClose > emaFast or plusDi > minusDi and adxValue >= minAdx or haClose > shortAtrLine)
+
+if barstate.isconfirmed
+    if bullSetup and (previousTrend <= 0 or haStrong)
+        trendState := 1
+    else if bearSetup and (previousTrend >= 0 or haStrong)
+        trendState := -1
+    else if longReversalRisk or shortReversalRisk
+        trendState := 0
+    else
+        trendState := previousTrend
+
+strongBuySignal = barstate.isconfirmed and trendState == 1 and previousTrend != 1
+strongSellSignal = barstate.isconfirmed and trendState == -1 and previousTrend != -1
+reversalSignal = barstate.isconfirmed and not strongBuySignal and not strongSellSignal and (longReversalRisk or shortReversalRisk)
+holdSignal = barstate.isconfirmed and not strongBuySignal and not strongSellSignal and not reversalSignal and (trendState == 0 or consolidating)
+buyHoldSignal = barstate.isconfirmed and trendState == 1 and previousTrend == 1 and not holdSignal and not reversalSignal
+sellHoldSignal = barstate.isconfirmed and trendState == -1 and previousTrend == -1 and not holdSignal and not reversalSignal
+
+allowShorts = tradeDirection == "Long and short"
+
+var bool holdPartialDone = false
+var bool reversalPartialDone = false
+
+if strategy.position_size == 0
+    holdPartialDone := false
+    reversalPartialDone := false
+
+if strongBuySignal
+    if strategy.position_size < 0
+        strategy.close("Short", comment="Opposite B")
+    strategy.entry("Long", strategy.long, comment="Strong B")
+    holdPartialDone := false
+    reversalPartialDone := false
+
+if allowShorts and strongSellSignal
+    if strategy.position_size > 0
+        strategy.close("Long", comment="Opposite S")
+    strategy.entry("Short", strategy.short, comment="Strong S")
+    holdPartialDone := false
+    reversalPartialDone := false
+
+if not allowShorts and strongSellSignal and strategy.position_size > 0
+    strategy.close("Long", comment="Strong S exit")
+
+if addOnContinuation and buyHoldSignal and strategy.position_size > 0
+    strategy.entry("Long", strategy.long, comment="Continuation B")
+
+if addOnContinuation and allowShorts and sellHoldSignal and strategy.position_size < 0
+    strategy.entry("Short", strategy.short, comment="Continuation S")
+
+if usePartialExits and holdSignal and not holdPartialDone
+    if strategy.position_size > 0
+        strategy.close("Long", qty_percent=holdExitPercent, comment="H partial")
+        holdPartialDone := true
+    if strategy.position_size < 0
+        strategy.close("Short", qty_percent=holdExitPercent, comment="H partial")
+        holdPartialDone := true
+
+if usePartialExits and reversalSignal and not reversalPartialDone
+    if strategy.position_size > 0
+        strategy.close("Long", qty_percent=reversalExitPercent, comment="R reduce")
+        reversalPartialDone := true
+    if strategy.position_size < 0
+        strategy.close("Short", qty_percent=reversalExitPercent, comment="R reduce")
+        reversalPartialDone := true
+
+if reversalSignal and not usePartialExits
+    if strategy.position_size > 0
+        strategy.close("Long", comment="R exit")
+    if strategy.position_size < 0
+        strategy.close("Short", comment="R exit")
+
+strategy.exit("Long ATR stop", from_entry="Long", stop=longAtrLine)
+strategy.exit("Short ATR stop", from_entry="Short", stop=shortAtrLine)
+
+deepGreen = color.rgb(0, 120, 55)
+lightGreen = color.rgb(85, 190, 120)
+deepRed = color.rgb(145, 25, 35)
+lightRed = color.rgb(225, 105, 105)
+holdColor = color.rgb(235, 170, 35)
+reversalColor = color.rgb(85, 95, 215)
+
+plotshape(strongBuySignal, title="Strong Buy B", location=location.belowbar, color=deepGreen, style=shape.labelup, text="B", textcolor=color.white, size=size.small)
+plotshape(buyHoldSignal, title="Buy / Hold B", location=location.belowbar, color=lightGreen, style=shape.labelup, text="B", textcolor=color.white, size=size.tiny)
+plotshape(strongSellSignal, title="Strong Sell S", location=location.abovebar, color=deepRed, style=shape.labeldown, text="S", textcolor=color.white, size=size.small)
+plotshape(sellHoldSignal, title="Sell / Hold S", location=location.abovebar, color=lightRed, style=shape.labeldown, text="S", textcolor=color.white, size=size.tiny)
+plotshape(reversalSignal, title="Reversal Risk R", location=location.abovebar, color=reversalColor, style=shape.labeldown, text="R", textcolor=color.white, size=size.tiny)
+plotshape(holdSignal, title="Hold / Consolidation H", location=location.top, color=holdColor, style=shape.labeldown, text="H", textcolor=color.black, size=size.tiny)
+
+plot(emaFast, title="HA Fast EMA", color=color.new(color.teal, 0), linewidth=1)
+plot(emaSlow, title="HA Slow EMA", color=color.new(color.orange, 0), linewidth=1)
+plot(strategy.position_size > 0 ? longAtrLine : na, title="Long ATR Stop", color=color.new(deepGreen, 20), style=plot.style_linebr)
+plot(strategy.position_size < 0 ? shortAtrLine : na, title="Short ATR Stop", color=color.new(deepRed, 20), style=plot.style_linebr)

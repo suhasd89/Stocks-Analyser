@@ -19,6 +19,7 @@ public record ScannerResult(
     Double percentBelowLifetimeHigh,
     Double high52Week,
     Double low52Week,
+    Double scannerScore,
     boolean buyRegion,
     boolean sellRegion,
     String scannedAt,

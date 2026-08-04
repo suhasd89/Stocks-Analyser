@@ -2,7 +2,8 @@ package com.suhas.stocktracker.model;
 
 public enum StrategyType {
     SMA("sma", "SMA Strategy: 20/50/200"),
-    V20("v20", "V20");
+    V20("v20", "V20"),
+    MULTIBAGGER("multibagger", "Multibagger Screener");
 
     private final String slug;
     private final String displayName;

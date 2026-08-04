@@ -1,85 +1,134 @@
 package com.suhas.stocktracker.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.suhas.stocktracker.config.AppProperties;
 import com.suhas.stocktracker.model.ScannerFailure;
 import com.suhas.stocktracker.model.ScannerResult;
 import com.suhas.stocktracker.model.ScannerRunResponse;
 import com.suhas.stocktracker.model.StrategyType;
 import com.suhas.stocktracker.model.WatchlistStock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
+import tools.jackson.databind.JsonNode;
 
 @Service
 public class ScannerService {
+    private static final Logger log = LoggerFactory.getLogger(ScannerService.class);
+
     private final RestClient restClient;
     private final WatchlistService watchlistService;
+    private final MarketUniverseService marketUniverseService;
     private final DatabaseService databaseService;
     private final AppProperties appProperties;
 
-    public ScannerService(RestClient restClient, WatchlistService watchlistService, DatabaseService databaseService,
+    public ScannerService(RestClient restClient, WatchlistService watchlistService,
+                          MarketUniverseService marketUniverseService, DatabaseService databaseService,
                           AppProperties appProperties) {
         this.restClient = restClient;
         this.watchlistService = watchlistService;
+        this.marketUniverseService = marketUniverseService;
         this.databaseService = databaseService;
         this.appProperties = appProperties;
     }
 
     public ScannerRunResponse runScanner(StrategyType strategyType) {
+        return runScanner(strategyType, null);
+    }
+
+    public ScannerRunResponse runScanner(StrategyType strategyType, String group) {
+        Instant started = Instant.now();
         long runId = databaseService.startScannerRun(strategyType);
-        List<ScannerResult> results = new ArrayList<>();
-        List<ScannerFailure> failures = new ArrayList<>();
-        List<WatchlistStock> stocks = watchlistService.getWatchlistForStrategy(strategyType);
+        List<WatchlistStock> stocks = strategyType == StrategyType.MULTIBAGGER
+            ? marketUniverseService.fetchNseEquityUniverse()
+            : watchlistService.getWatchlistForStrategy(strategyType, group);
         Map<String, List<WatchlistStock>> stocksByYahooSymbol = new LinkedHashMap<>();
+        String scanScope = strategyType == StrategyType.MULTIBAGGER
+            ? "NSE EQ universe"
+            : group == null || group.isBlank() || "ALL".equalsIgnoreCase(group)
+            ? "all eligible lists"
+            : group;
 
         for (WatchlistStock stock : stocks) {
             stocksByYahooSymbol.computeIfAbsent(stock.yahooSymbol(), ignored -> new ArrayList<>()).add(stock);
         }
 
-        for (Map.Entry<String, List<WatchlistStock>> entry : stocksByYahooSymbol.entrySet()) {
-            String yahooSymbol = entry.getKey();
-            List<WatchlistStock> matchingStocks = entry.getValue();
-            try {
-                List<Candle> candles = fetchCandles(yahooSymbol);
-                for (WatchlistStock stock : matchingStocks) {
-                    results.add(evaluate(strategyType, stock, candles));
-                }
-            } catch (Exception exception) {
-                String message = exception.getMessage();
-                for (WatchlistStock stock : matchingStocks) {
-                    failures.add(scannerFailure(runId, strategyType, stock, message));
-                }
-            }
+        int concurrency = Math.max(1, appProperties.scanner().maxConcurrency());
+        log.info("Starting {} scanner run {} for {} with {} watchlist rows and {} unique Yahoo symbols using concurrency {}.",
+            strategyType.slug(), runId, scanScope, stocks.size(), stocksByYahooSymbol.size(), concurrency);
 
-            try {
-                Thread.sleep(appProperties.scanner().pauseMillis());
-            } catch (InterruptedException interruptedException) {
-                Thread.currentThread().interrupt();
-                for (WatchlistStock stock : matchingStocks) {
-                    failures.add(scannerFailure(runId, strategyType, stock, "interrupted"));
-                }
-            }
+        List<ScanBatchResult> batches;
+        try (ExecutorService executor = Executors.newFixedThreadPool(
+            concurrency,
+            Thread.ofVirtual().name("scanner-" + strategyType.slug() + "-", 0).factory()
+        )) {
+            List<CompletableFuture<ScanBatchResult>> futures = stocksByYahooSymbol.entrySet()
+                .stream()
+                .map(entry -> CompletableFuture.supplyAsync(
+                    () -> scanYahooSymbol(runId, strategyType, entry.getKey(), entry.getValue()),
+                    executor
+                ))
+                .toList();
+
+            batches = futures.stream().map(CompletableFuture::join).toList();
         }
+
+        List<ScannerResult> results = batches.stream()
+            .map(ScanBatchResult::results)
+            .flatMap(Collection::stream)
+            .toList();
+        List<ScannerFailure> failures = batches.stream()
+            .map(ScanBatchResult::failures)
+            .flatMap(Collection::stream)
+            .toList();
 
         databaseService.upsertScannerResults(results);
         databaseService.insertScannerFailures(failures);
         String message = failures.isEmpty()
-            ? "Scanned " + results.size() + " stocks successfully."
-            : "Scanned " + results.size() + " stocks. Failed: " + failures.size() + ".";
+            ? "Scanned " + results.size() + " stocks successfully for " + scanScope + "."
+            : "Scanned " + results.size() + " stocks for " + scanScope + ". Failed: " + failures.size() + ".";
         databaseService.finishScannerRun(runId, failures.isEmpty() ? "SUCCESS" : "PARTIAL_SUCCESS", message, results.size());
         List<String> failed = failures.stream()
             .map(failure -> failure.symbol() + ": " + failure.error())
             .toList();
+        long elapsedMillis = Duration.between(started, Instant.now()).toMillis();
+        log.info("Finished {} scanner run {} for {}. Results: {}, failures: {}, status: {}, elapsedMs: {}.",
+            strategyType.slug(), runId, scanScope, results.size(), failures.size(),
+            failures.isEmpty() ? "SUCCESS" : "PARTIAL_SUCCESS", elapsedMillis);
         return new ScannerRunResponse(true, strategyType.slug(), runId, results.size(), failed, message);
+    }
+
+    private ScanBatchResult scanYahooSymbol(long runId, StrategyType strategyType, String yahooSymbol,
+                                            List<WatchlistStock> matchingStocks) {
+        try {
+            List<Candle> candles = fetchCandles(yahooSymbol);
+            List<ScannerResult> results = matchingStocks.stream()
+                .map(stock -> evaluate(strategyType, stock, candles))
+                .toList();
+            log.debug("Scanned {} for {} row(s).", yahooSymbol, matchingStocks.size());
+            return new ScanBatchResult(results, List.of());
+        } catch (Exception exception) {
+            String message = exception.getMessage();
+            List<ScannerFailure> failures = matchingStocks.stream()
+                .map(stock -> scannerFailure(runId, strategyType, stock, message))
+                .toList();
+            log.warn("Failed to scan Yahoo symbol {} for {} row(s): {}", yahooSymbol, matchingStocks.size(), message);
+            return new ScanBatchResult(List.of(), failures);
+        }
     }
 
     private ScannerFailure scannerFailure(long runId, StrategyType strategyType, WatchlistStock stock, String error) {
@@ -124,12 +173,14 @@ public class ScannerService {
         JsonNode highs = quote.path("high");
         JsonNode lows = quote.path("low");
         JsonNode closes = quote.path("close");
+        JsonNode volumes = quote.path("volume");
         List<Candle> candles = new ArrayList<>();
         for (int index = 0; index < timestamps.size(); index++) {
             JsonNode close = closes.get(index);
             JsonNode open = opens.get(index);
             JsonNode high = highs.get(index);
             JsonNode low = lows.get(index);
+            JsonNode volume = volumes.get(index);
             if (close == null || close.isNull() || open == null || open.isNull() || high == null || high.isNull() || low == null || low.isNull()) {
                 continue;
             }
@@ -138,7 +189,8 @@ public class ScannerService {
                 open.asDouble(),
                 high.asDouble(),
                 low.asDouble(),
-                close.asDouble()
+                close.asDouble(),
+                volume == null || volume.isNull() ? 0 : volume.asLong()
             ));
         }
         if (candles.isEmpty()) {
@@ -151,6 +203,7 @@ public class ScannerService {
         return switch (strategyType) {
             case SMA -> evaluateSma(stock, candles);
             case V20 -> evaluateV20(stock, candles);
+            case MULTIBAGGER -> evaluateMultibagger(stock, candles);
         };
     }
 
@@ -188,6 +241,7 @@ public class ScannerService {
             sma20,
             sma50,
             sma200,
+            null,
             null,
             null,
             null,
@@ -342,6 +396,132 @@ public class ScannerService {
             percentBelowLifetimeHigh,
             high52Week,
             low52Week,
+            null,
+            false,
+            false,
+            OffsetDateTime.now().toString(),
+            notes
+        );
+    }
+
+    private ScannerResult evaluateMultibagger(WatchlistStock stock, List<Candle> candles) {
+        List<Double> closes = new ArrayList<>();
+        List<Double> highs = new ArrayList<>();
+        List<Double> lows = new ArrayList<>();
+        for (Candle candle : candles) {
+            closes.add(candle.close());
+            highs.add(candle.high());
+            lows.add(candle.low());
+        }
+        if (closes.size() < 200) {
+            throw new IllegalStateException("not enough history to calculate multibagger trend score");
+        }
+
+        Candle latest = candles.getLast();
+        double lastClose = latest.close();
+        Double sma50 = sma(closes, 50);
+        Double sma200 = sma(closes, 200);
+        Double high52Week = rollingExtreme(highs, 260, true);
+        Double low52Week = rollingExtreme(lows, 260, false);
+        Double oneMonthReturn = percentChangeFromLookback(closes, 21);
+        Double threeMonthReturn = percentChangeFromLookback(closes, 63);
+        Double sixMonthReturn = percentChangeFromLookback(closes, 126);
+        Double twelveMonthReturn = percentChangeFromLookback(closes, 252);
+        Double averageTurnover = averageTurnover(candles, 20);
+        double percentBelow52WeekHigh = high52Week != null && high52Week > 0
+            ? ((high52Week - lastClose) / high52Week) * 100.0
+            : 0.0;
+
+        int score = 0;
+        List<String> points = new ArrayList<>();
+        List<String> checks = new ArrayList<>();
+
+        if (sma200 != null && lastClose > sma200) {
+            score += 15;
+            points.add("price is above 200-DMA");
+        }
+        if (sma50 != null && sma200 != null && sma50 > sma200) {
+            score += 10;
+            points.add("50-DMA is above 200-DMA");
+        }
+        if (sixMonthReturn != null && sixMonthReturn >= 40.0) {
+            score += 15;
+            points.add("6M price growth is " + formatPercent(sixMonthReturn));
+        } else if (sixMonthReturn != null && sixMonthReturn >= 25.0) {
+            score += 10;
+            points.add("6M price growth is " + formatPercent(sixMonthReturn));
+        }
+        if (twelveMonthReturn != null && twelveMonthReturn >= 60.0) {
+            score += 10;
+            points.add("12M price growth is " + formatPercent(twelveMonthReturn));
+        } else if (twelveMonthReturn != null && twelveMonthReturn >= 35.0) {
+            score += 6;
+            points.add("12M price growth is " + formatPercent(twelveMonthReturn));
+        }
+        if (threeMonthReturn != null && threeMonthReturn >= 15.0) {
+            score += 8;
+            points.add("3M momentum is " + formatPercent(threeMonthReturn));
+        }
+        if (oneMonthReturn != null && oneMonthReturn > 0.0) {
+            score += 7;
+            points.add("1M momentum remains positive");
+        }
+        if (percentBelow52WeekHigh <= 15.0) {
+            score += 10;
+            points.add("within " + formatPercent(percentBelow52WeekHigh) + " of 52-week high");
+        } else if (percentBelow52WeekHigh <= 25.0) {
+            score += 6;
+            points.add("within " + formatPercent(percentBelow52WeekHigh) + " of 52-week high");
+        }
+        if (high52Week != null && low52Week != null && low52Week > 0 && high52Week / low52Week >= 1.6) {
+            score += 5;
+            points.add("52-week range shows rerating potential");
+        }
+        if (averageTurnover != null && averageTurnover >= 50_000_000.0) {
+            score += 10;
+            points.add("20D average traded value is above Rs 5 crore");
+        } else if (averageTurnover != null && averageTurnover >= 10_000_000.0) {
+            score += 6;
+            points.add("20D average traded value is above Rs 1 crore");
+        } else {
+            checks.add("liquidity is thin; entry/exit risk needs manual check");
+        }
+        if (sma50 != null && lastClose > sma50) {
+            score += 10;
+            points.add("price is above 50-DMA");
+        } else {
+            checks.add("near-term trend is weak versus 50-DMA");
+        }
+
+        String signal = score >= 70 ? "ALERT" : score >= 55 ? "WATCH" : "NONE";
+        String notes = "Score " + score + "/100. Points: "
+            + (points.isEmpty() ? "no strong multibagger-screen factors yet" : String.join("; ", points))
+            + ". Checks: "
+            + (checks.isEmpty()
+            ? "verify sales/PAT acceleration, cash conversion, pledges, valuation, and source filings before acting"
+            : String.join("; ", checks) + "; verify sales/PAT acceleration, cash conversion, pledges, valuation, and source filings before acting")
+            + ".";
+
+        return new ScannerResult(
+            StrategyType.MULTIBAGGER.slug(),
+            stock.symbol(),
+            stock.yahooSymbol(),
+            signal,
+            StrategyType.MULTIBAGGER.displayName(),
+            signal.equals("NONE") ? null : latest.time(),
+            lastClose,
+            null,
+            sma50,
+            sma200,
+            sixMonthReturn,
+            null,
+            null,
+            null,
+            null,
+            percentBelow52WeekHigh,
+            high52Week,
+            low52Week,
+            (double) score,
             false,
             false,
             OffsetDateTime.now().toString(),
@@ -360,6 +540,39 @@ public class ScannerService {
         return sum / period;
     }
 
+    private Double percentChangeFromLookback(List<Double> closes, int sessions) {
+        if (closes.size() <= sessions) {
+            return null;
+        }
+        double previous = closes.get(closes.size() - 1 - sessions);
+        if (previous <= 0) {
+            return null;
+        }
+        return ((closes.getLast() - previous) / previous) * 100.0;
+    }
+
+    private Double averageTurnover(List<Candle> candles, int sessions) {
+        if (candles.isEmpty()) {
+            return null;
+        }
+        int start = Math.max(0, candles.size() - sessions);
+        double total = 0;
+        int count = 0;
+        for (int index = start; index < candles.size(); index++) {
+            Candle candle = candles.get(index);
+            if (candle.volume() <= 0) {
+                continue;
+            }
+            total += candle.close() * candle.volume();
+            count++;
+        }
+        return count == 0 ? null : total / count;
+    }
+
+    private String formatPercent(double value) {
+        return String.format("%.1f%%", value);
+    }
+
     private String isoFromUnix(long unixSeconds) {
         return OffsetDateTime.ofInstant(Instant.ofEpochSecond(unixSeconds), ZoneOffset.UTC).toString();
     }
@@ -376,6 +589,9 @@ public class ScannerService {
         return extreme;
     }
 
-    private record Candle(String time, double open, double high, double low, double close) {
+    private record Candle(String time, double open, double high, double low, double close, long volume) {
+    }
+
+    private record ScanBatchResult(List<ScannerResult> results, List<ScannerFailure> failures) {
     }
 }

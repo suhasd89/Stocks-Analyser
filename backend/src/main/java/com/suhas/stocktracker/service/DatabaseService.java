@@ -93,6 +93,7 @@ public class DatabaseService {
                 percent_below_lifetime_high REAL,
                 high_52_week REAL,
                 low_52_week REAL,
+                scanner_score REAL,
                 buy_region INTEGER NOT NULL DEFAULT 0,
                 sell_region INTEGER NOT NULL DEFAULT 0,
                 scanned_at TEXT NOT NULL,
@@ -104,6 +105,7 @@ public class DatabaseService {
         ensureColumn("strategy_scanner_results", "target_price", "REAL");
         ensureColumn("strategy_scanner_results", "sequence_start_date", "TEXT");
         ensureColumn("strategy_scanner_results", "sequence_end_date", "TEXT");
+        ensureColumn("strategy_scanner_results", "scanner_score", "REAL");
     }
 
     private void ensureDataDirectory() {
@@ -164,9 +166,9 @@ public class DatabaseService {
                 INSERT INTO strategy_scanner_results (
                     strategy_slug, ticker, yahoo_symbol, signal, strategy, signal_date, last_close,
                     sma20, sma50, sma200, percent_move, entry_price, target_price, sequence_start_date, sequence_end_date,
-                    percent_below_lifetime_high, high_52_week, low_52_week,
+                    percent_below_lifetime_high, high_52_week, low_52_week, scanner_score,
                     buy_region, sell_region, scanned_at, notes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(strategy_slug, ticker) DO UPDATE SET
                     yahoo_symbol = excluded.yahoo_symbol,
                     signal = excluded.signal,
@@ -184,6 +186,7 @@ public class DatabaseService {
                     percent_below_lifetime_high = excluded.percent_below_lifetime_high,
                     high_52_week = excluded.high_52_week,
                     low_52_week = excluded.low_52_week,
+                    scanner_score = excluded.scanner_score,
                     buy_region = excluded.buy_region,
                     sell_region = excluded.sell_region,
                     scanned_at = excluded.scanned_at,
@@ -207,6 +210,7 @@ public class DatabaseService {
                 result.percentBelowLifetimeHigh(),
                 result.high52Week(),
                 result.low52Week(),
+                result.scannerScore(),
                 result.buyRegion() ? 1 : 0,
                 result.sellRegion() ? 1 : 0,
                 scannedAt,
@@ -240,6 +244,7 @@ public class DatabaseService {
             nullableDouble(rs, "percent_below_lifetime_high"),
             nullableDouble(rs, "high_52_week"),
             nullableDouble(rs, "low_52_week"),
+            nullableDouble(rs, "scanner_score"),
             rs.getInt("buy_region") == 1,
             rs.getInt("sell_region") == 1,
             rs.getString("scanned_at"),
@@ -338,6 +343,14 @@ public class DatabaseService {
             stock.yahooSymbol(),
             nextSortOrder,
             OffsetDateTime.now().toString()
+        );
+    }
+
+    public void deleteWatchlistStock(String group, String symbol) {
+        jdbcTemplate.update(
+            "DELETE FROM watchlist_stocks WHERE group_name = ? AND symbol = ?",
+            group,
+            symbol
         );
     }
 

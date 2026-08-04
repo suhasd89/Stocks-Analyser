@@ -159,6 +159,10 @@ public class NotificationSchedulerService {
                                 .append(" - ")
                                 .append(formatDate(row.sequenceEndDate()));
                         }
+                    } else if ("multibagger".equalsIgnoreCase(dashboard.strategy())) {
+                        builder.append(" | Score ")
+                            .append(row.scannerScore() == null ? "-" : String.format(Locale.ENGLISH, "%.0f", row.scannerScore()))
+                            .append(" | Close ").append(formatCurrency(row.scannerPrice()));
                     } else {
                         builder.append(" | Close ").append(formatCurrency(row.scannerPrice()));
                     }

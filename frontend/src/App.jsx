@@ -1,9 +1,13 @@
 import { useEffect, useState } from "react";
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080/api").replace(/\/$/, "");
+const DEFAULT_API_BASE = typeof window === "undefined"
+  ? "http://127.0.0.1:8080/api"
+  : `${window.location.protocol}//${window.location.hostname}:8080/api`;
+const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? DEFAULT_API_BASE).replace(/\/$/, "");
 const STRATEGIES = [
   { key: "sma", label: "SMA" },
   { key: "v20", label: "V20" },
+  { key: "multibagger", label: "Multibagger" },
 ];
 const MANAGEABLE_LISTS = [
   { key: "V40", label: "V40" },
@@ -50,6 +54,7 @@ function formatPrice(value) {
 function signalClass(signal) {
   if (signal === "BUY" || signal === "ALERT") return "pill buy";
   if (signal === "SELL") return "pill sell";
+  if (signal === "WATCH") return "pill watch";
   return "pill neutral";
 }
 
@@ -63,17 +68,53 @@ function tradingViewUrl(row) {
 function buildShareMessage(strategy, activeList, alerts) {
   const title = `${strategy.toUpperCase()} alerts${activeList === "ALL" ? "" : ` - ${activeList}`}`;
   if (alerts.length === 0) {
-    return `${title}\nNo BUY or SELL signals found.`;
+    return strategy === "multibagger"
+      ? `${title}\nNo multibagger candidates found.`
+      : `${title}\nNo BUY or SELL signals found.`;
   }
 
   const rows = alerts.map((row) => {
     const extra = strategy === "sma"
       ? `Close ${formatPrice(row.scannerPrice)}`
+      : strategy === "multibagger"
+      ? `Score ${row.scannerScore?.toFixed(0) ?? "-"} | ${row.notes || "Review required"}`
       : `Entry ${formatPrice(row.entryPrice)} | Target ${formatPrice(row.targetPrice)}`;
     return `${row.symbol} - ${row.scannerSignal} - ${extra} - ${formatDate(row.scannerSignalDate)}`;
   });
 
   return [title, ...rows].join("\n");
+}
+
+function strategyTitle(strategy) {
+  if (strategy === "sma") return "SMA";
+  if (strategy === "multibagger") return "Multibagger";
+  return "V20";
+}
+
+function strategyAlertTitle(strategy) {
+  if (strategy === "sma") return "Active SMA Alerts";
+  if (strategy === "multibagger") return "Multibagger Candidates";
+  return "Active V20 Alerts";
+}
+
+function strategyAlertCopy(strategy) {
+  if (strategy === "sma") {
+    return "Stocks currently in BUY or SELL region from the SMA historical scan.";
+  }
+  if (strategy === "multibagger") {
+    return "Stocks from the NSE EQ universe that pass the first-pass multibagger screen. This is discovery only; source and fundamental checks still come next.";
+  }
+  return "Stocks whose latest valid V20 setup met the 20% threshold and passed the list-specific rules.";
+}
+
+function strategyWatchlistCopy(strategy) {
+  if (strategy === "sma") {
+    return "Local scanner signal for each stock using your SMA 20/50/200 logic.";
+  }
+  if (strategy === "multibagger") {
+    return "First-pass score and points for each NSE EQ candidate found by the discovery scan. Verify revenue/PAT growth, cash conversion, pledges, valuation, and filings before acting.";
+  }
+  return "Latest valid V20 setup for each stock, including entry, target, and formation window.";
 }
 
 export default function App() {
@@ -102,6 +143,12 @@ export default function App() {
     password: "",
     name: "",
     email: "",
+  });
+  const [theme, setTheme] = useState(() => {
+    if (typeof window === "undefined") {
+      return "light";
+    }
+    return window.localStorage.getItem("stock-tracker-theme") || "light";
   });
 
   const isAdmin = currentUser?.role === "ADMIN";
@@ -156,9 +203,12 @@ export default function App() {
   const runScan = async () => {
     setScanLoading(true);
     try {
-      await fetchJson(`${API_BASE}/scanner/run?strategy=${strategy}`, { method: "POST" });
+      const groupQuery = activeList === "ALL" ? "" : `&group=${encodeURIComponent(activeList)}`;
+      await fetchJson(`${API_BASE}/scanner/run?strategy=${strategy}${groupQuery}`, { method: "POST" });
       await loadDashboard();
-      setStatusMessage("Scan completed successfully.");
+      setStatusMessage(activeList === "ALL"
+        ? "Scan completed successfully."
+        : `Scan completed successfully for ${activeList}.`);
     } finally {
       setScanLoading(false);
     }
@@ -193,6 +243,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem("stock-tracker-theme", theme);
+  }, [theme]);
+
+  useEffect(() => {
     if (!currentUser) {
       return;
     }
@@ -209,6 +264,10 @@ export default function App() {
   }, [currentUser, strategy, isAdmin]);
 
   useEffect(() => {
+    if (strategy === "multibagger" && activeList !== "ALL") {
+      setActiveList("ALL");
+      return;
+    }
     if (strategy === "sma" && normalizeGroup(activeList) !== "V40" && activeList !== "ALL") {
       setActiveList("V40");
     }
@@ -413,9 +472,6 @@ export default function App() {
     if (strategy === "sma" && item.key !== "V40") {
       return false;
     }
-    if (item.key === "V200" && !dashboard.watchlist.some((row) => normalizeGroup(row.group) === "V200")) {
-      return false;
-    }
     return dashboard.watchlist.some((row) => normalizeGroup(row.group) === normalizeGroup(item.key));
   });
 
@@ -444,6 +500,8 @@ export default function App() {
       symbol: failure.symbol,
       name: failure.name,
       yahooSymbol: failure.yahooSymbol,
+      originalGroup: failure.group,
+      originalSymbol: failure.symbol,
     });
     setStatusMessage("");
   };
@@ -466,7 +524,7 @@ export default function App() {
         },
         body: JSON.stringify(issueEdit),
       });
-      const nextStrategy = normalizeGroup(payload.group) === "V40" ? "sma" : "v20";
+      const nextStrategy = normalizeGroup(payload.group) === "V40" ? "sma" : strategy;
       setStrategy(nextStrategy);
       setActiveList(payload.group);
       await Promise.all([
@@ -497,7 +555,7 @@ export default function App() {
           rawText: manageText,
         }),
       });
-      const nextStrategy = normalizeGroup(manageGroup) === "V40" ? "sma" : "v20";
+      const nextStrategy = normalizeGroup(manageGroup) === "V40" ? "sma" : strategy;
       setStrategy(nextStrategy);
       setActiveList(manageGroup);
       await Promise.all([loadWatchlists(), loadDashboard(nextStrategy)]);
@@ -536,12 +594,26 @@ export default function App() {
           {isAdmin ? (
             <button type="button" className={page === "manage" ? "nav-link nav-link-button active" : "nav-link nav-link-button"} onClick={() => setPage("manage")}>Manage Lists</button>
           ) : null}
+          <button
+            type="button"
+            className="nav-link nav-link-button"
+            onClick={() => setTheme((current) => current === "dark" ? "light" : "dark")}
+          >
+            {theme === "dark" ? "Light" : "Dark"}
+          </button>
           <span className="user-pill">{currentUser.name} · {currentUser.role}</span>
           <button type="button" className="nav-link nav-link-button" onClick={logout}>Logout</button>
         </nav>
       </header>
 
-      {statusMessage ? <div className="status-banner">{statusMessage}</div> : null}
+      {statusMessage ? (
+        <div className="status-banner">
+          <span>{statusMessage}</span>
+          <button type="button" className="banner-close" onClick={() => setStatusMessage("")} aria-label="Dismiss message">
+            x
+          </button>
+        </div>
+      ) : null}
 
       {page === "dashboard" ? (
         <>
@@ -550,7 +622,7 @@ export default function App() {
           <p className="eyebrow">Spring Boot + React</p>
           <h1>Indian Stock Signal Tracker</h1>
           <p className="subcopy">
-            A calmer workspace for your `SMA` and `V20` strategies across V40, V40 Next, V200, Bank, and NBFC lists.
+            A calmer workspace for your SMA, V20, and Multibagger discovery scans across V40, V40 Next, V200, Bank, and NBFC lists.
           </p>
         </div>
         <div className="hero-card hero-metrics">
@@ -572,11 +644,11 @@ export default function App() {
               <strong>{dashboard.summary.trackedStocks}</strong>
             </div>
             <div className="metric buy-tint">
-              <span>{strategy === "sma" ? "Buy Signals" : "Active Alerts"}</span>
+              <span>{strategy === "sma" ? "Buy Signals" : strategy === "multibagger" ? "Candidates" : "Active Alerts"}</span>
               <strong>{dashboard.summary.buySignals}</strong>
             </div>
             <div className="metric sell-tint">
-              <span>{strategy === "sma" ? "Sell Signals" : "Sell Hits"}</span>
+              <span>{strategy === "sma" ? "Sell Signals" : strategy === "multibagger" ? "Watch" : "Sell Hits"}</span>
               <strong>{dashboard.summary.sellSignals}</strong>
             </div>
           </div>
@@ -627,14 +699,14 @@ export default function App() {
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               type="search"
-              placeholder={`Search ${strategy.toUpperCase()} stocks`}
+              placeholder={`Search ${strategyTitle(strategy)} stocks`}
             />
           </div>
           <div className="nav-block actions-block">
             <span className="nav-label">Actions</span>
             <div className="toolbar-actions">
               <button onClick={runScan} disabled={scanLoading}>
-                {scanLoading ? "Scanning..." : "Run Local Scan"}
+                {scanLoading ? "Scanning..." : strategy === "multibagger" ? "Run Discovery Scan" : "Run Local Scan"}
               </button>
               <button className="secondary-button" onClick={refreshAll}>Refresh</button>
             </div>
@@ -672,13 +744,9 @@ export default function App() {
       <section className="panel" id="alerts">
         <div className="panel-header">
           <h2>
-            {strategy === "sma" ? "Active SMA Alerts" : "Active V20 Alerts"} ({activeScannerAlerts.length})
+            {strategyAlertTitle(strategy)} ({activeScannerAlerts.length})
           </h2>
-          <p>
-            {strategy === "sma"
-              ? "Stocks currently in BUY or SELL region from the SMA historical scan."
-              : "Stocks whose latest valid V20 setup met the 20% threshold and passed the list-specific rules."}
-          </p>
+          <p>{strategyAlertCopy(strategy)}</p>
         </div>
         <div className="alerts">
           {activeScannerAlerts.length === 0 ? (
@@ -717,6 +785,10 @@ export default function App() {
                   <small>
                     20 SMA: {row.sma20?.toFixed(2) ?? "-"} | 50 SMA: {row.sma50?.toFixed(2) ?? "-"} | 200 SMA: {row.sma200?.toFixed(2) ?? "-"}
                   </small>
+                ) : strategy === "multibagger" ? (
+                  <small>
+                    Score: {row.scannerScore?.toFixed(0) ?? "-"} | {row.notes || "Review source filings before acting."}
+                  </small>
                 ) : (
                   <small>
                     Entry: {formatPrice(row.entryPrice)} | Target: {formatPrice(row.targetPrice)} | Move: {row.percentMove?.toFixed(2) ?? "-"}%
@@ -730,12 +802,8 @@ export default function App() {
 
       <section className="panel" id="watchlist">
         <div className="panel-header">
-          <h2>{strategy === "sma" ? "SMA Watchlist" : "V20 Watchlist"} ({filteredWatchlist.length})</h2>
-          <p>
-            {strategy === "sma"
-              ? "Local scanner signal for each stock using your SMA 20/50/200 logic."
-              : "Latest valid V20 setup for each stock, including entry, target, and formation window."}
-          </p>
+          <h2>{strategyTitle(strategy)} Watchlist ({filteredWatchlist.length})</h2>
+          <p>{strategyWatchlistCopy(strategy)}</p>
         </div>
         <div className="table-wrap">
           <table>
@@ -747,6 +815,17 @@ export default function App() {
                   <th>Last Daily Close</th>
                   <th>Signal Date</th>
                   <th>SMA Stack</th>
+                </tr>
+              ) : strategy === "multibagger" ? (
+                <tr>
+                  <th>Stock</th>
+                  <th>Signal</th>
+                  <th>Score</th>
+                  <th>Last Close</th>
+                  <th>6M Move</th>
+                  <th>52W High Gap</th>
+                  <th>Trend</th>
+                  <th>Why It Matched</th>
                 </tr>
               ) : (
                 <tr>
@@ -792,6 +871,16 @@ export default function App() {
                           ? `20: ${row.sma20.toFixed(2)} | 50: ${row.sma50.toFixed(2)} | 200: ${row.sma200.toFixed(2)}`
                           : "-"}
                       </td>
+                    </>
+                  ) : strategy === "multibagger" ? (
+                    <>
+                      <td><span className={signalClass(row.scannerSignal)}>{row.scannerSignal}</span></td>
+                      <td>{row.scannerScore?.toFixed(0) ?? "-"}</td>
+                      <td>{formatPrice(row.scannerPrice)}</td>
+                      <td>{row.percentMove?.toFixed(2) ? `${row.percentMove.toFixed(2)}%` : "-"}</td>
+                      <td>{row.percentBelowLifetimeHigh?.toFixed(2) ? `${row.percentBelowLifetimeHigh.toFixed(2)}%` : "-"}</td>
+                      <td>{row.sma50 && row.sma200 ? `50: ${row.sma50.toFixed(2)} | 200: ${row.sma200.toFixed(2)}` : "-"}</td>
+                      <td className="notes-cell">{row.notes || "-"}</td>
                     </>
                   ) : (
                     <>

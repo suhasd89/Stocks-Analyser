@@ -17,6 +17,10 @@ public class StartupScanner {
     ApplicationRunner initialScannerRunner(DatabaseService databaseService, ScannerService scannerService) {
         return args -> {
             for (StrategyType strategyType : StrategyType.values()) {
+                if (strategyType == StrategyType.MULTIBAGGER) {
+                    log.info("Skipping initial multibagger discovery scan; run it manually from the webapp when needed.");
+                    continue;
+                }
                 if (databaseService.hasScannerResults(strategyType)) {
                     continue;
                 }
