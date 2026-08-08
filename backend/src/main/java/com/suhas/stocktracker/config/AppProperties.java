@@ -5,7 +5,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "app")
 public record AppProperties(Scanner scanner, MarketUniverse marketUniverse, Watchlists watchlists, Scheduler scheduler,
-                            Notifications notifications) {
+                            Email email, Notifications notifications) {
 
     public record Scanner(String range, String interval, String strategyName, long pauseMillis, int maxConcurrency) {
     }
@@ -20,6 +20,9 @@ public record AppProperties(Scanner scanner, MarketUniverse marketUniverse, Watc
     }
 
     public record Job(boolean enabled, String cron) {
+    }
+
+    public record Email(String provider) {
     }
 
     public record Notifications(String recipients, String from, String senderName, boolean hourlyIncludeEmpty,

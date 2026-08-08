@@ -188,10 +188,40 @@ Data location: `./backend/data/signals.db`
 - `POST /api/watchlists/replace` - Update watchlist
 
 ### Admin Notifications
-- `POST /api/notifications/send-summary?mode=hourly|daily` - Send email notification
+- `POST /api/notifications/send-summary?mode=hourly|daily` - Send email notification (hourly/daily scheduled summary)
+- `POST /api/notifications/send-intraday` - Send intraday alert email (runs automatically every 30 mins, 9 AM - 4 PM IST)
 
 ### Health Check
 - `GET /api/health` - Server health status
+
+## Scheduler Configuration
+
+### Three Scheduler Types
+
+**1. Intraday Alerts (New - Automatic)**
+- **Schedule**: Every 30 minutes, 9:00 AM - 4:00 PM IST (weekdays)
+- **Strategies**: SMA and V20 only
+- **Data Included**: Entry Price, Current Price, Exit Price, Potential Gains (%)
+- **Organization**: By watchlist group (V40, V40 NEXT, V200, BANK, NBFC)
+- **Format**: Beautiful HTML email with color-coded signals
+- **Auto-trigger**: No configuration needed - runs automatically
+- **Manual trigger**: `POST /api/notifications/send-intraday`
+
+**2. Hourly Summary (Configurable)**
+- **env**: `APP_SCHEDULER_HOURLY_ENABLED`
+- **cron env**: `APP_SCHEDULER_HOURLY_CRON`
+- **default cron**: `0 5 10-15 ? * MON-FRI`
+- **trigger**: `POST /api/notifications/send-summary?mode=hourly`
+
+**3. Daily Summary (Configurable)**
+- **env**: `APP_SCHEDULER_DAILY_ENABLED`
+- **cron env**: `APP_SCHEDULER_DAILY_CRON`
+- **default cron**: `0 20 16 ? * MON-FRI`
+- **trigger**: `POST /api/notifications/send-summary?mode=daily`
+
+### Timezone
+- **env**: `APP_SCHEDULER_TIMEZONE`
+- **default**: `Asia/Kolkata`
 
 ## Common Tasks
 

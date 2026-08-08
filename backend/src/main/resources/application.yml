@@ -6,6 +6,7 @@ logging:
     name: ${APP_LOG_FILE:./data/stock-tracker.log}
   level:
     com.suhas.stocktracker: ${APP_LOG_LEVEL:INFO}
+    root: ${ROOT_LOG_LEVEL:WARN}
 
 spring:
   threads:
@@ -15,26 +16,45 @@ spring:
     url: jdbc:sqlite:./data/signals.db
     driver-class-name: org.sqlite.JDBC
   mail:
-    host: ${SPRING_MAIL_HOST:}
+    host: ${SPRING_MAIL_HOST:smtp.gmail.com}
     port: ${SPRING_MAIL_PORT:587}
-    username: ${SPRING_MAIL_USERNAME:}
-    password: ${SPRING_MAIL_PASSWORD:}
+    username: ${SPRING_MAIL_USERNAME:suhasdeshmukh550@gmail.com}
+    password: ${SPRING_MAIL_PASSWORD:1!Dontknow@550}
+    default-encoding: UTF-8
     properties:
       mail:
+        debug: false
         smtp:
           auth: ${SPRING_MAIL_SMTP_AUTH:true}
           starttls:
             enable: ${SPRING_MAIL_SMTP_STARTTLS_ENABLE:true}
+            required: ${SPRING_MAIL_SMTP_STARTTLS_REQUIRED:true}
+          connectiontimeout: 10000
+          timeout: 10000
+          writetimeout: 10000
+
 app:
+  # Email Configuration (NEW)
+  email:
+    # Provider: 'local' for file-based POC, 'smtp' for real email
+    # local   = Saves emails to ./data/emails/ directory (for testing)
+    # smtp    = Sends via SMTP (for production)
+    provider: ${APP_EMAIL_PROVIDER:smtp}
+
+  # Scanner Configuration
   scanner:
     range: 2y
     interval: 1d
     strategy-name: "SMA Strategy: 20/50/200"
     pause-millis: 350
     max-concurrency: ${APP_SCANNER_MAX_CONCURRENCY:12}
+
+  # Market Universe Configuration
   market-universe:
     nse-equity-list-url: ${APP_MARKET_UNIVERSE_NSE_EQUITY_LIST_URL:https://archives.nseindia.com/content/equities/EQUITY_L.csv}
     max-symbols: ${APP_MARKET_UNIVERSE_MAX_SYMBOLS:0}
+
+  # Watchlist Configuration
   watchlists:
     resources:
       V40: watchlists/v40.yml
@@ -42,6 +62,8 @@ app:
       V200: watchlists/v200.yml
       BANK: watchlists/bank.yml
       NBFC: watchlists/nbfc.yml
+
+  # Scheduler Configuration
   scheduler:
     timezone: ${APP_SCHEDULER_TIMEZONE:Asia/Kolkata}
     hourly:
@@ -50,9 +72,16 @@ app:
     daily:
       enabled: ${APP_SCHEDULER_DAILY_ENABLED:false}
       cron: ${APP_SCHEDULER_DAILY_CRON:0 20 16 ? * MON-FRI}
+
+  # Notification Configuration
   notifications:
-    recipients: ${APP_NOTIFICATION_RECIPIENTS:}
-    from: ${APP_NOTIFICATION_FROM:}
+    # Email recipients (comma-separated, no spaces)
+    recipients: ${APP_NOTIFICATION_RECIPIENTS:suhasdeshmukh550@gmail.com}
+    # Sender email address (MUST be same as SMTP username for Gmail)
+    from: ${APP_NOTIFICATION_FROM:suhasdeshmukh550@gmail.com}
+    # Sender display name
     sender-name: ${APP_NOTIFICATION_SENDER_NAME:Stock Signal Tracker}
+    # Include empty alerts in hourly summary
     hourly-include-empty: ${APP_NOTIFICATION_HOURLY_INCLUDE_EMPTY:false}
+    # Include empty alerts in daily summary
     daily-include-empty: ${APP_NOTIFICATION_DAILY_INCLUDE_EMPTY:true}
