@@ -988,49 +988,6 @@ export default function App() {
         </div>
       </section>
 
-      {isAdmin ? (
-        <section className="panel panel-manage roomy-panel">
-          <div className="panel-header">
-            <h2>Fix Or Add Stock</h2>
-            <p>Select a failed row, adjust the final symbol details, and save it into the correct list.</p>
-          </div>
-          {issueEdit ? (
-            <>
-              <div className="issue-edit-grid">
-                <label className="field-label">
-                  <span>List</span>
-                  <select value={issueEdit.group} onChange={(event) => updateIssueEdit("group", event.target.value)}>
-                    {MANAGEABLE_LISTS.map((item) => (
-                      <option key={item.key} value={item.key}>{item.label}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="field-label">
-                  <span>Symbol</span>
-                  <input value={issueEdit.symbol} onChange={(event) => updateIssueEdit("symbol", event.target.value)} />
-                </label>
-                <label className="field-label">
-                  <span>Name</span>
-                  <input value={issueEdit.name} onChange={(event) => updateIssueEdit("name", event.target.value)} />
-                </label>
-                <label className="field-label">
-                  <span>Yahoo Symbol</span>
-                  <input value={issueEdit.yahooSymbol} onChange={(event) => updateIssueEdit("yahooSymbol", event.target.value)} placeholder="Example: BSE.NS" />
-                </label>
-              </div>
-              <div className="toolbar-actions">
-                <button type="button" onClick={saveIssueStock} disabled={issueSaveLoading}>
-                  {issueSaveLoading ? "Saving..." : "Save Stock"}
-                </button>
-                <button type="button" className="secondary-button" onClick={() => setIssueEdit(null)}>Cancel</button>
-              </div>
-            </>
-          ) : (
-            <div className="empty">Choose `Edit` from a failed stock row to correct or move it.</div>
-          )}
-        </section>
-      ) : null}
-
       <section className="panel">
         <div className="panel-header">
           <h2>Latest Run Failures ({filteredScannerFailures.length})</h2>
@@ -1062,27 +1019,92 @@ export default function App() {
                 </tr>
               </thead>
               <tbody>
-                {filteredScannerFailures.map((failure) => (
-                  <tr key={`${failure.runId}-${failure.group}-${failure.symbol}-${failure.yahooSymbol}`}>
-                    <td>
-                      <div className="stock-cell">
-                        <strong>{failure.symbol}</strong>
-                        <span>{failure.name}</span>
-                      </div>
-                    </td>
-                    <td>{normalizeGroup(failure.group) === "V40NEXT" ? "V40 NEXT" : failure.group}</td>
-                    <td><code className="inline-code">{failure.yahooSymbol}</code></td>
-                    <td className="error-text">{failure.error}</td>
-                    <td>{formatDate(failure.failedAt)}</td>
-                    {isAdmin ? (
-                      <td>
-                        <button type="button" className="secondary-button compact-button" onClick={() => startIssueEdit(failure)}>
-                          Edit
-                        </button>
-                      </td>
-                    ) : null}
-                  </tr>
-                ))}
+                {filteredScannerFailures.map((failure) => {
+                  const isEditingRow = isAdmin
+                    && issueEdit
+                    && issueEdit.originalGroup === failure.group
+                    && issueEdit.originalSymbol === failure.symbol;
+                  return (
+                    <tr key={`${failure.runId}-${failure.group}-${failure.symbol}-${failure.yahooSymbol}`}>
+                      {isEditingRow ? (
+                        <>
+                          <td>
+                            <div className="inline-edit-stack">
+                              <input
+                                className="inline-edit-input"
+                                value={issueEdit.symbol}
+                                onChange={(event) => updateIssueEdit("symbol", event.target.value)}
+                                placeholder="Symbol"
+                              />
+                              <input
+                                className="inline-edit-input"
+                                value={issueEdit.name}
+                                onChange={(event) => updateIssueEdit("name", event.target.value)}
+                                placeholder="Name"
+                              />
+                            </div>
+                          </td>
+                          <td>
+                            <select
+                              className="inline-edit-input"
+                              value={issueEdit.group}
+                              onChange={(event) => updateIssueEdit("group", event.target.value)}
+                            >
+                              {MANAGEABLE_LISTS.map((item) => (
+                                <option key={item.key} value={item.key}>{item.label}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td>
+                            <input
+                              className="inline-edit-input"
+                              value={issueEdit.yahooSymbol}
+                              onChange={(event) => updateIssueEdit("yahooSymbol", event.target.value)}
+                              placeholder="Example: BSE.NS"
+                            />
+                          </td>
+                          <td className="error-text">{failure.error}</td>
+                          <td>{formatDate(failure.failedAt)}</td>
+                          <td>
+                            <div className="inline-edit-actions">
+                              <button type="button" className="compact-button" onClick={saveIssueStock} disabled={issueSaveLoading}>
+                                {issueSaveLoading ? "Saving..." : "Save"}
+                              </button>
+                              <button
+                                type="button"
+                                className="secondary-button compact-button"
+                                onClick={() => setIssueEdit(null)}
+                                disabled={issueSaveLoading}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td>
+                            <div className="stock-cell">
+                              <strong>{failure.symbol}</strong>
+                              <span>{failure.name}</span>
+                            </div>
+                          </td>
+                          <td>{normalizeGroup(failure.group) === "V40NEXT" ? "V40 NEXT" : failure.group}</td>
+                          <td><code className="inline-code">{failure.yahooSymbol}</code></td>
+                          <td className="error-text">{failure.error}</td>
+                          <td>{formatDate(failure.failedAt)}</td>
+                          {isAdmin ? (
+                            <td>
+                              <button type="button" className="secondary-button compact-button" onClick={() => startIssueEdit(failure)}>
+                                Edit
+                              </button>
+                            </td>
+                          ) : null}
+                        </>
+                      )}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

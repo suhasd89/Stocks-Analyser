@@ -10,12 +10,15 @@ import jakarta.annotation.PostConstruct;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Types;
 import java.time.OffsetDateTime;
 import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class DatabaseService {
@@ -140,83 +143,95 @@ public class DatabaseService {
             """, status, message, OffsetDateTime.now().toString(), stocksScanned, runId);
     }
 
+    @Transactional
     public void insertScannerFailures(List<ScannerFailure> failures) {
-        for (ScannerFailure failure : failures) {
-            jdbcTemplate.update("""
-                INSERT INTO strategy_scanner_failures (
-                    run_id, strategy_slug, symbol, name, group_name, yahoo_symbol, error, failed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                failure.runId(),
-                failure.strategySlug(),
-                failure.symbol(),
-                failure.name(),
-                failure.group(),
-                failure.yahooSymbol(),
-                failure.error(),
-                failure.failedAt()
-            );
+        if (failures.isEmpty()) {
+            return;
         }
+        jdbcTemplate.batchUpdate("""
+            INSERT INTO strategy_scanner_failures (
+                run_id, strategy_slug, symbol, name, group_name, yahoo_symbol, error, failed_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            failures,
+            failures.size(),
+            (ps, failure) -> {
+                ps.setLong(1, failure.runId());
+                ps.setString(2, failure.strategySlug());
+                ps.setString(3, failure.symbol());
+                ps.setString(4, failure.name());
+                ps.setString(5, failure.group());
+                ps.setString(6, failure.yahooSymbol());
+                ps.setString(7, failure.error());
+                ps.setString(8, failure.failedAt());
+            }
+        );
     }
 
+    @Transactional
     public void upsertScannerResults(List<ScannerResult> results) {
-        String scannedAt = OffsetDateTime.now().toString();
-        for (ScannerResult result : results) {
-            jdbcTemplate.update("""
-                INSERT INTO strategy_scanner_results (
-                    strategy_slug, ticker, yahoo_symbol, signal, strategy, signal_date, last_close,
-                    sma20, sma50, sma200, percent_move, entry_price, target_price, sequence_start_date, sequence_end_date,
-                    percent_below_lifetime_high, high_52_week, low_52_week, scanner_score,
-                    buy_region, sell_region, scanned_at, notes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(strategy_slug, ticker) DO UPDATE SET
-                    yahoo_symbol = excluded.yahoo_symbol,
-                    signal = excluded.signal,
-                    strategy = excluded.strategy,
-                    signal_date = excluded.signal_date,
-                    last_close = excluded.last_close,
-                    sma20 = excluded.sma20,
-                    sma50 = excluded.sma50,
-                    sma200 = excluded.sma200,
-                    percent_move = excluded.percent_move,
-                    entry_price = excluded.entry_price,
-                    target_price = excluded.target_price,
-                    sequence_start_date = excluded.sequence_start_date,
-                    sequence_end_date = excluded.sequence_end_date,
-                    percent_below_lifetime_high = excluded.percent_below_lifetime_high,
-                    high_52_week = excluded.high_52_week,
-                    low_52_week = excluded.low_52_week,
-                    scanner_score = excluded.scanner_score,
-                    buy_region = excluded.buy_region,
-                    sell_region = excluded.sell_region,
-                    scanned_at = excluded.scanned_at,
-                    notes = excluded.notes
-                """,
-                result.strategySlug(),
-                result.ticker(),
-                result.yahooSymbol(),
-                result.signal(),
-                result.strategy(),
-                result.signalDate(),
-                result.lastClose(),
-                result.sma20(),
-                result.sma50(),
-                result.sma200(),
-                result.percentMove(),
-                result.entryPrice(),
-                result.targetPrice(),
-                result.sequenceStartDate(),
-                result.sequenceEndDate(),
-                result.percentBelowLifetimeHigh(),
-                result.high52Week(),
-                result.low52Week(),
-                result.scannerScore(),
-                result.buyRegion() ? 1 : 0,
-                result.sellRegion() ? 1 : 0,
-                scannedAt,
-                result.notes()
-            );
+        if (results.isEmpty()) {
+            return;
         }
+        String scannedAt = OffsetDateTime.now().toString();
+        jdbcTemplate.batchUpdate("""
+            INSERT INTO strategy_scanner_results (
+                strategy_slug, ticker, yahoo_symbol, signal, strategy, signal_date, last_close,
+                sma20, sma50, sma200, percent_move, entry_price, target_price, sequence_start_date, sequence_end_date,
+                percent_below_lifetime_high, high_52_week, low_52_week, scanner_score,
+                buy_region, sell_region, scanned_at, notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(strategy_slug, ticker) DO UPDATE SET
+                yahoo_symbol = excluded.yahoo_symbol,
+                signal = excluded.signal,
+                strategy = excluded.strategy,
+                signal_date = excluded.signal_date,
+                last_close = excluded.last_close,
+                sma20 = excluded.sma20,
+                sma50 = excluded.sma50,
+                sma200 = excluded.sma200,
+                percent_move = excluded.percent_move,
+                entry_price = excluded.entry_price,
+                target_price = excluded.target_price,
+                sequence_start_date = excluded.sequence_start_date,
+                sequence_end_date = excluded.sequence_end_date,
+                percent_below_lifetime_high = excluded.percent_below_lifetime_high,
+                high_52_week = excluded.high_52_week,
+                low_52_week = excluded.low_52_week,
+                scanner_score = excluded.scanner_score,
+                buy_region = excluded.buy_region,
+                sell_region = excluded.sell_region,
+                scanned_at = excluded.scanned_at,
+                notes = excluded.notes
+            """,
+            results,
+            results.size(),
+            (ps, result) -> {
+                ps.setString(1, result.strategySlug());
+                ps.setString(2, result.ticker());
+                ps.setString(3, result.yahooSymbol());
+                ps.setString(4, result.signal());
+                ps.setString(5, result.strategy());
+                ps.setString(6, result.signalDate());
+                setNullableDouble(ps, 7, result.lastClose());
+                setNullableDouble(ps, 8, result.sma20());
+                setNullableDouble(ps, 9, result.sma50());
+                setNullableDouble(ps, 10, result.sma200());
+                setNullableDouble(ps, 11, result.percentMove());
+                setNullableDouble(ps, 12, result.entryPrice());
+                setNullableDouble(ps, 13, result.targetPrice());
+                ps.setString(14, result.sequenceStartDate());
+                ps.setString(15, result.sequenceEndDate());
+                setNullableDouble(ps, 16, result.percentBelowLifetimeHigh());
+                setNullableDouble(ps, 17, result.high52Week());
+                setNullableDouble(ps, 18, result.low52Week());
+                setNullableDouble(ps, 19, result.scannerScore());
+                ps.setInt(20, result.buyRegion() ? 1 : 0);
+                ps.setInt(21, result.sellRegion() ? 1 : 0);
+                ps.setString(22, scannedAt);
+                ps.setString(23, result.notes());
+            }
+        );
     }
 
     public List<ScannerResult> fetchScannerResults(StrategyType strategyType) {
@@ -433,5 +448,13 @@ public class DatabaseService {
     private Double nullableDouble(ResultSet rs, String column) throws SQLException {
         double value = rs.getDouble(column);
         return rs.wasNull() ? null : value;
+    }
+
+    private void setNullableDouble(PreparedStatement ps, int index, Double value) throws SQLException {
+        if (value == null) {
+            ps.setNull(index, Types.DOUBLE);
+        } else {
+            ps.setDouble(index, value);
+        }
     }
 }

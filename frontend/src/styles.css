@@ -1107,6 +1107,23 @@ tbody tr:last-child td {
   gap: 4px;
 }
 
+.inline-edit-stack {
+  display: grid;
+  gap: 6px;
+}
+
+.inline-edit-input {
+  min-width: 140px;
+  padding: 8px 12px;
+  border-radius: 10px;
+}
+
+.inline-edit-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .stock-cell strong {
   font-size: 0.98rem;
 }
